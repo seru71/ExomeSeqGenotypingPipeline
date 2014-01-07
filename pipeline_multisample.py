@@ -735,39 +735,39 @@ def link(none, bam, extra):
     if not os.path.exists(bam):
         os.symlink(extra[1], bam) 
 
-@follows(link)
+#@follows(link)
 @transform(link, suffix(".bam"), '.bam.bai')
 def index(input, output):
     """create bam index"""
     index_bam(input)
 
-@follows(index)
+#@follows(index)
 @transform(link, suffix(".bam"), '.dedup.bam')
 def remove_dups(input, output):
     """Mark dups"""
     dup_removal_samtools(input, output)
     # remove(input)
 
-@follows(remove_dups)
+#@follows(remove_dups)
 @transform(remove_dups, suffix(".dedup.bam"), '.dedup.bam.bai')
 def index_dups(input, output):
     """create bam index"""
     index_bam(input)
 
-@follows(index_dups)
+#@follows(index_dups)
 @transform(index_dups, suffix(".dedup.bam.bai"), '.realign.intervals', r'\1.dedup.bam')
 def find_realignment_intervals(foo, output, bam):
    """Find regions to be re-aligned due to indels"""
    find_realigns(bam, output)
 
-@follows(find_realignment_intervals)
+#@follows(find_realignment_intervals)
 @transform(find_realignment_intervals, suffix(".realign.intervals"), '.realigned.bam', r'\1.dedup.bam')
 def indel_realigner(input, output, bam):
    """Re-aligns regions around indels"""
    run_realigner(bam,input,output)
    # remove(input)
 
-@follows(indel_realigner)
+#@follows(indel_realigner)
 @transform(indel_realigner, suffix('.realigned.bam'), '.gatk.bam.recal_data.grp')
 def recalibrate_baseq1(input, output):
     """Base quality score recalibration in bam file
@@ -775,7 +775,7 @@ def recalibrate_baseq1(input, output):
     index_bam(input)
     base_recalibrator(input, output)
 
-@follows(recalibrate_baseq1)
+#@follows(recalibrate_baseq1)
 @transform(indel_realigner, suffix('.realigned.bam'), add_inputs(r'\1.gatk.bam.recal_data.grp'),'.gatk.bam')
 def recalibrate_baseq2(inputs, output):
     """Base quality score recalibration in bam file
@@ -783,25 +783,25 @@ def recalibrate_baseq2(inputs, output):
     print_recalibrated(inputs[0], inputs[1], output)
     # remove(inputs[0])
 
-@follows(recalibrate_baseq2)
+#@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.quality_score')
 def metric_quality_score_distribution(input,output):
     """docstring for metrics1"""
     bam_quality_score_distribution(input, output, output + '.pdf')
 
-@follows(recalibrate_baseq2)
+#@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.metrics')
 def metric_alignment(input,output):
     """docstring for metrics1"""
     bam_alignment_metrics(input, output)
 
-@follows(recalibrate_baseq2)
+#@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.coverage.sample_summary', r'\1.coverage')
 def metric_coverage(input, output, output_format):
     bam_coverage_statistics(input,output_format)
 
 @jobs_limit(6)
-@follows(recalibrate_baseq2)
+#@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.reduced.bam')
 def reduce_bam(input, output):
     reduce_reads(input,output)
@@ -900,6 +900,7 @@ def split_snps(input, output, sample):
 if __name__ == '__main__':
     if options.just_print:
         pipeline_printout(sys.stdout, options.target_tasks, options.forced_tasks,
+			    gnu_make_maximal_rebuild_mode = options.rebuild_mode,
                             verbose=options.verbose)
 
     elif options.flowchart:
@@ -909,6 +910,7 @@ if __name__ == '__main__':
                                     os.path.splitext(options.flowchart)[1][1:],
                                     options.target_tasks,
                                     options.forced_tasks,
+                            	    gnu_make_maximal_rebuild_mode = options.rebuild_mode,
                                     no_key_legend   = not options.key_legend_in_graph)
     else:
         pipeline_run(options.target_tasks, options.forced_tasks,
