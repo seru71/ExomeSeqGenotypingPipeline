@@ -25,7 +25,7 @@ import glob
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 #path to binaries
-script_path = os.path.dirname(os.path.realpath(__file__))
+script_path = os.path.dirname(os.path.relpath(__file__))
 java = os.path.join(script_path,'../src/jre1.7.0/bin/java')
 picard = os.path.join(script_path,'../src/picard-tools')
 gatk = os.path.join(script_path,'../src/GenomeAnalysisTK/GenomeAnalysisTK.jar')
@@ -775,8 +775,18 @@ def recalibrate_baseq1(input, output):
     index_bam(input)
     base_recalibrator(input, output)
 
+# This custom check ensures that the recalibrate_baseq2 step is not run in --rebuild_mode if the .gatk.bam exists
+# This way metric_coverage target can be run after the intermediate files (e.g. .realigned.bam) are removed
+def is_gatk_missing(inputs, gatk_bam):
+    # ignore input files of this step: input[0] - .realigned.bam, and input[1] - .recal_data.grp file
+    if not os.path.exists(gatk_bam):
+        return True, "Missing file %s" % gatk_bam
+    else:
+        return False, "File %s exists" % gatk_bam
+
 #@follows(recalibrate_baseq1)
 @transform(indel_realigner, suffix('.realigned.bam'), add_inputs(r'\1.gatk.bam.recal_data.grp'),'.gatk.bam')
+@check_if_uptodate(is_gatk_bam_missing)
 def recalibrate_baseq2(inputs, output):
     """Base quality score recalibration in bam file
         Part 2: rewrite quality scores into a new bam file"""   
