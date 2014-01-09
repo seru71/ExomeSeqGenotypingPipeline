@@ -777,7 +777,7 @@ def recalibrate_baseq1(input, output):
 
 # This custom check ensures that the recalibrate_baseq2 step is not run in --rebuild_mode if the .gatk.bam exists
 # This way metric_coverage target can be run after the intermediate files (e.g. .realigned.bam) are removed
-def is_gatk_missing(inputs, gatk_bam):
+def is_gatk_bam_missing(inputs, gatk_bam):
     # ignore input files of this step: input[0] - .realigned.bam, and input[1] - .recal_data.grp file
     if not os.path.exists(gatk_bam):
         return True, "Missing file %s" % gatk_bam
@@ -838,19 +838,19 @@ def call_variants(infiles, output):
 #     split_snps(input,output[0])
 #     split_indels(input,output[1])
 
-@follows('call_variants')
+@follows(call_variants)
 @files('multisample.gatk.vcf', ['multisample.gatk.snp.model','multisample.gatk.snp.model.tranches'])
 def find_snp_tranches_for_recalibration(input,output):
     """Run variantRecalibration for trusted sites"""
     recalibrate_snps(input,output[0])
 
-@follows('find_snp_tranches_for_recalibration')
+@follows(find_snp_tranches_for_recalibration)
 @files('multisample.gatk.vcf', ['multisample.gatk.indel.model','multisample.gatk.indel.model.tranches'])
 def find_indel_tranches_for_recalibration(input,output):
     """Run variantRecalibration for trusted sites"""
     recalibrate_indels(input,output[0])
 
-@follows('find_indel_tranches_for_recalibration')
+@follows(find_indel_tranches_for_recalibration)
 @files(['multisample.gatk.vcf','multisample.gatk.snp.model','multisample.gatk.snp.model.tranches'],'multisample.gatk.recalibratedSNPS.rawIndels.vcf')
 def apply_recalibration_filter_snps(input,output):
     apply_recalibration_snps(input[0],input[1],input[2],output)
@@ -858,12 +858,12 @@ def apply_recalibration_filter_snps(input,output):
     #     remove(input[1])
     #     remove(input[2])
 
-@follows('find_indel_tranches_for_recalibration')
+@follows(apply_recalibration_filter_snps)
 @files(['multisample.gatk.recalibratedSNPS.rawIndels.vcf','multisample.gatk.indel.model','multisample.gatk.indel.model.tranches'],'multisample.gatk.preHardFiltering.vcf')
 def apply_recalibration_filter_indels(input,output):
     apply_recalibration_indels(input[0],input[1],input[2],output)
 
-@follows('apply_recalibration_filter_indels')
+@follows(apply_recalibration_filter_indels)
 @files('multisample.gatk.preHardFiltering.vcf', 'multisample.gatk.markedHardFiltering.vcf')
 def apply_filter(input,output):
     """docstring for apply_indel_filter"""
@@ -877,7 +877,7 @@ def filter_variants(infile,outfile):
     remove_filtered(infile,outfile)
     # remove(infile)
 
-@follows('filter_variants')
+@follows(filter_variants)
 @transform(filter_variants,suffix('.analysisReady.vcf'),'.analysisReady.exome.vcf')
 def final_calls(input,output):
     """Produce the final variant calls"""
