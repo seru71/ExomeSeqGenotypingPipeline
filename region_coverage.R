@@ -8,14 +8,15 @@ suppressMessages(require(GenomicFeatures,quiet=TRUE))
 suppressMessages(require(GenomicRanges,quiet=TRUE))
 suppressMessages(require(SynergizeR,quiet=TRUE))
 
-VERSION <- '1.1-Mar2012'
+VERSION <- '1.1.1-Jan2014'
 
 createBamIndex <- function
 ### creates index for bam file if it does not exist
 (bamFile
 ### path to bam file
 ) {
-    baiFile = paste(bam, '.bai', sep='')
+#    baiFile = paste(bamFile, '.bai', sep='')
+    baiFile = sub(".bam$",".bai",bamFile)
     if (!file.exists(baiFile)) {
         indexBam(bamFile)
     } 
@@ -40,7 +41,7 @@ bamFile
 
     x <- scanBam(bamFile, param = param)[[1]]
     ranges = GRanges(seqnames=Rle(x$rname), ranges=IRanges(x$pos, width=x$qwidth))
-    seqnames(ranges) <- sub("^(\\d+)","chr\\1",seqnames(ranges))
+    seqlevels(ranges) <- sub("^(\\d+)","chr\\1",seqlevels(ranges))
     ranges
     # coverage(ranges)
     #coverage(IRanges(x[["pos"]], width = x[["qwidth"]]))
@@ -68,7 +69,7 @@ bamRegion <- getSpecificRegion(chr,start,end,bam)
 # txdb <- makeTranscriptDbFromUCSC(genome='hg19',tablename='ccdsGene')
 # saveFeatures(txdb,'/export/astrakanfs/stefanj/reference/ccdsGene.hg19.<date>.sqlite')
 # stop('finished')
-FEATURES <- '/export/astrakanfs/stefanj/reference/ccdsGene.hg19.mar2012.sqlite'
+FEATURES <- '/export/astrakanfs/stefanj/reference/ccdsGene.hg19.jan2014.sqlite'
 txdb = loadFeatures(FEATURES)
 
 #Calulate transcript overlaps with the full genomic range
