@@ -9,14 +9,15 @@ suppressMessages(require(GenomicRanges,quiet=TRUE))
 suppressMessages(require(biomaRt,quiet=TRUE))
 options(error=traceback)
 
-VERSION <- '1.0-Apr2012'
+VERSION <- '1.0.1-Jan2014'
 
 createBamIndex <- function
 ### creates index for bam file if it does not exist
 (bamFile
 ### path to bam file
 ) {
-    baiFile = paste(bam, '.bai', sep='')
+#    baiFile = paste(bamFile, '.bai', sep='')
+    baiFile = sub(".bam$",".bai",bamFile)
     if (!file.exists(baiFile)) {
         indexBam(bamFile)
     } 
@@ -41,7 +42,7 @@ bamFile
 
     x <- scanBam(bamFile, param = param)[[1]]
     ranges = GRanges(seqnames=Rle(x$rname), ranges=IRanges(x$pos, width=x$qwidth))
-    seqnames(ranges) <- sub("^(\\d+)","chr\\1",seqnames(ranges))
+    seqlevels(ranges) <- sub("^(\\d+)","chr\\1",seqlevels(ranges))
     ranges
 }
 
@@ -67,8 +68,8 @@ genes_info <- getBM(attributes = c("hgnc_symbol","chromosome_name","start_positi
 # txdb <- makeTranscriptDbFromUCSC(genome='hg19',tablename='ccdsGene')
 # saveFeatures(txdb,'/export/astrakanfs/stefanj/reference/ccdsGene.hg19.<date>.sqlite')
 # stop('finished')
-FEATURES <- '/export/astrakanfs/stefanj/reference/ccdsGene.hg19.mar2012.sqlite'
-txdb = loadFeatures(FEATURES)
+FEATURES <- '/export/astrakanfs/stefanj/reference/ccdsGene.hg19.jan2014.sqlite'
+txdb = loadDb(FEATURES)
 
 cat('Script version', VERSION,'\n')
 cat('Database', FEATURES,'\n\n')
@@ -91,7 +92,7 @@ for (i in 1:length(genes)) {
 		end <- info$end_position
 		bamRegion <- getSpecificRegion(chr,start,end,bam)
 		region <- GRanges(chr,IRanges(start, end))
-		seqnames(region) <- sub("^(\\d+)","chr\\1",seqnames(region))
+		seqlevels(region) <- sub("^(\\d+)","chr\\1",seqlevels(region))
 
 		hg19.transcripts <- transcriptsByOverlaps(txdb,region)
 		hg19.exons <- exonsByOverlaps(txdb,region)
