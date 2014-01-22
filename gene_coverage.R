@@ -9,14 +9,14 @@ suppressMessages(require(GenomicRanges,quiet=TRUE))
 suppressMessages(require(biomaRt,quiet=TRUE))
 options(error=traceback)
 
-VERSION <- '1.0.1-Jan2014'
+VERSION <- '1.1-Jan2014'
 
 createBamIndex <- function
 ### creates index for bam file if it does not exist
 (bamFile
 ### path to bam file
 ) {
-#    baiFile = paste(bamFile, '.bai', sep='')
+    #baiFile = paste(bamFile, '.bai', sep='')
     baiFile = sub(".bam$",".bai",bamFile)
     if (!file.exists(baiFile)) {
         indexBam(bamFile)

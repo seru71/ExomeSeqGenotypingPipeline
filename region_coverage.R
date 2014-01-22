@@ -8,14 +8,14 @@ suppressMessages(require(GenomicFeatures,quiet=TRUE))
 suppressMessages(require(GenomicRanges,quiet=TRUE))
 suppressMessages(require(SynergizeR,quiet=TRUE))
 
-VERSION <- '1.1.1-Jan2014'
+VERSION <- '1.2-Jan2014'
 
 createBamIndex <- function
 ### creates index for bam file if it does not exist
 (bamFile
 ### path to bam file
 ) {
-#    baiFile = paste(bamFile, '.bai', sep='')
+    #baiFile = paste(bamFile, '.bai', sep='')
     baiFile = sub(".bam$",".bai",bamFile)
     if (!file.exists(baiFile)) {
         indexBam(bamFile)
@@ -70,11 +70,11 @@ bamRegion <- getSpecificRegion(chr,start,end,bam)
 # saveFeatures(txdb,'/export/astrakanfs/stefanj/reference/ccdsGene.hg19.<date>.sqlite')
 # stop('finished')
 FEATURES <- '/export/astrakanfs/stefanj/reference/ccdsGene.hg19.jan2014.sqlite'
-txdb = loadFeatures(FEATURES)
+txdb = loadDb(FEATURES)
 
 #Calulate transcript overlaps with the full genomic range
 region <- GRanges(chr,IRanges(start, end))
-seqnames(region) <- sub("^(\\d+)","chr\\1",seqnames(region))
+seqlevels(region) <- sub("^(\\d+)","chr\\1",seqlevels(region))
 
 hg19.transcripts <- transcriptsByOverlaps(txdb,region)
 hg19.exons <- exonsByOverlaps(txdb,region)
