@@ -32,7 +32,7 @@ gatk = os.path.join(script_path,'../src/GenomeAnalysisTK/GenomeAnalysisTK.jar')
 #reference files
 reference = os.path.join(script_path,'../reference/human_g1k_v37.clean.fasta')
 dbsnp = os.path.join(script_path,'../reference/dbsnp_137.b37.vcf')
-exome = os.path.join(script_path,'../reference/Nimblegen_SeqCap_EZ_Exome_v2_37_targetRegOnly_wingspan.bed')
+exome = os.path.join(script_path,'../reference/Nimblegen_SeqCap_EZ_Exome_v2_37_targetRegOnly_wingspan_g1k.bed')
 capture = os.path.join(script_path,'../reference/Nimblegen_SeqCap_EZ_Exome_v2_37_targetRegOnly_g1k.bed')
 hapmap = os.path.join(script_path,'../reference/hapmap_3.3.b37.sites.vcf')
 omni = os.path.join(script_path,'../reference/1000G_omni2.5.b37.sites.vcf')
@@ -784,7 +784,7 @@ def is_gatk_bam_missing(inputs, gatk_bam):
     else:
         return False, "File %s exists" % gatk_bam
 
-#@follows(recalibrate_baseq1)
+@follows(recalibrate_baseq1)
 @transform(indel_realigner, suffix('.realigned.bam'), add_inputs(r'\1.gatk.bam.recal_data.grp'),'.gatk.bam')
 @check_if_uptodate(is_gatk_bam_missing)
 def recalibrate_baseq2(inputs, output):
