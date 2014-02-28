@@ -1,52 +1,19 @@
 # Rscript for coverage statistics and number of features in a region of a bam file
 # Rscript coverage.R '/export/astrakanfs/mpesj/Agilent/1040PRN0046_GRCh37.gatk.bam' 7 36399490 55889334 8
 
-.libPaths('../R/library')
+VERSION <- '1.3-Feb2014'
+
+FEATURES <- '/export/astrakanfs/stefanj/reference/ccdsGene.hg19.jan2014.sqlite'
+#FEATURES <- '/home/pawels/Work/mgm-projects/test-data/ccdsGene.hg19.jan2014.sqlite'
+
+.libPaths('/export/astrakanfs/stefanj/R/library')
 suppressMessages(require(Rsamtools,quiet=TRUE))
 suppressMessages(require(multicore,quiet=TRUE))
 suppressMessages(require(GenomicFeatures,quiet=TRUE))
 suppressMessages(require(GenomicRanges,quiet=TRUE))
 suppressMessages(require(SynergizeR,quiet=TRUE))
 
-VERSION <- '1.2-Jan2014'
-
-createBamIndex <- function
-### creates index for bam file if it does not exist
-(bamFile
-### path to bam file
-) {
-    #baiFile = paste(bamFile, '.bai', sep='')
-    baiFile = sub(".bam$",".bai",bamFile)
-    if (!file.exists(baiFile)) {
-        indexBam(bamFile)
-    } 
-}
-
-getSpecificRegion <- function
-### function to return a GRanges object for specific region of a bam file
-### should reduce memory consumption because the bam file is not read entirely
-(chr, 
-### chromosome
-chrStart,
-### start position (bp)
-chrEnd,
-### end position (bp)
-bamFile
-### bam file
-) {
-    param <- ScanBamParam(what = c("rname", "strand","pos", "qwidth"),
-                        which = GRanges(chr,IRanges(chrStart, chrEnd)),
-                        flag = scanBamFlag(isUnmappedQuery = FALSE)
-                        )                    
-
-    x <- scanBam(bamFile, param = param)[[1]]
-    ranges = GRanges(seqnames=Rle(x$rname), ranges=IRanges(x$pos, width=x$qwidth))
-    seqlevels(ranges) <- sub("^(\\d+)","chr\\1",seqlevels(ranges))
-    ranges
-    # coverage(ranges)
-    #coverage(IRanges(x[["pos"]], width = x[["qwidth"]]))
-    ### coverage IRLe object
-}
+source('shared_functions.R')
 
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -67,9 +34,8 @@ bamRegion <- getSpecificRegion(chr,start,end,bam)
 
 # To update the ccds gene database uncomment the 3 lines below.
 # txdb <- makeTranscriptDbFromUCSC(genome='hg19',tablename='ccdsGene')
-# saveFeatures(txdb,'/export/astrakanfs/stefanj/reference/ccdsGene.hg19.<date>.sqlite')
+# saveFeatures(txdb,'<PATH>/ccdsGene.hg19.<date>.sqlite')
 # stop('finished')
-FEATURES <- '/export/astrakanfs/stefanj/reference/ccdsGene.hg19.jan2014.sqlite'
 txdb = loadDb(FEATURES)
 
 #Calulate transcript overlaps with the full genomic range
@@ -84,8 +50,9 @@ number.transcripts <- length(hg19.transcripts)
 number.exons <- length(hg19.exons)
 
 #intersect the transcript range with the actual reads reported, to calculate coverage
-coverage.transcripts <- Views(coverage(bamRegion)[paste('chr',chr,sep='')],as(hg19.transcripts,"RangesList")[paste('chr',chr,sep='')])
-coverage.exons <- Views(coverage(bamRegion)[paste('chr',chr,sep='')],as(hg19.exons,"RangesList")[paste('chr',chr,sep='')])
+chrNr=paste('chr',chr,sep='')
+coverage.transcripts <- Views(coverage(bamRegion)[chrNr],as(hg19.transcripts,"RangesList")[chrNr])
+coverage.exons <- Views(coverage(bamRegion)[chrNr],as(hg19.exons,"RangesList")[chrNr])
 
 #The mean is the weighted mean
 coverage.exon.means <- viewMeans(coverage.exons)[[1]]%*%width(coverage.exons)[[1]]/sum(width(coverage.exons)[[1]])
@@ -94,8 +61,8 @@ coverage.exon.means <- viewMeans(coverage.exons)[[1]]%*%width(coverage.exons)[[1
 elementMetadata(hg19.transcripts)$mean_coverage <- as.vector(viewMeans(coverage.transcripts))
 elementMetadata(hg19.exons)$mean_coverage <- as.vector(viewMeans(coverage.exons))
 
-transcripts.less_than_minimum.covered <- length(which(elementMetadata(hg19.transcripts)[, "mean_coverage"] < minCoverage))
-exons.less_than_minimum <- hg19.exons[which(elementMetadata(hg19.exons)[, "mean_coverage"] < minCoverage)]
+transcripts.less_than_minimum.covered <- length(which(unlist(elementMetadata(hg19.transcripts)$mean_coverage[1],use.names=F) < minCoverage))
+exons.less_than_minimum <- hg19.exons[unlist(elementMetadata(hg19.exons)$mean_coverage[1],use.names=F) < minCoverage]
 exons.less_than_minimum.covered <- length(exons.less_than_minimum)
 
 transcripts.pct = round(transcripts.less_than_minimum.covered/number.transcripts*100)
@@ -135,7 +102,8 @@ if (exons.less_than_minimum.covered > 0) {
 
     results <- as.data.frame(exons.less_than_minimum)
     for(i in 1:exons.less_than_minimum.covered) {
-        meanCoverage <- formatC(elementMetadata(exons.less_than_minimum[i])[1,"mean_coverage"],digits=2)
+        #meanCoverage <- formatC(unlist(elementMetadata(exons.less_than_minimum[i])[1,"mean_coverage"],use.names=F),digits=2)
+        meanCoverage=unlist(exons.less_than_minimum$mean_coverage[1],use.names=F)[i]
         transcripts <- exons_to_transcripts[which(exons_to_transcripts[,1] == i),2]
         genes <- c()
         for (transcript in exons_to_transcripts[which(exons_to_transcripts[,1] == i),2]) {
@@ -143,7 +111,7 @@ if (exons.less_than_minimum.covered > 0) {
         }
         genes <- unique(na.omit(genes[genes != "NA"]))
         # chromosome <- results[i,][1]
-		chromosome <- chr
+		    chromosome <- chr
         chromstart <- results[i,][2]
         chromend <- results[i,][3]
 

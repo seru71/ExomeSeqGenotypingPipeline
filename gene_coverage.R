@@ -1,10 +1,12 @@
 # Rscript for coverage statistics for a list of genes in a sample
 # Rscript coverage.R '<full path to bam file>' geneA geneB geneX minCoverage
 
-FEATURES <- '/export/astrakanfs/stefanj/reference/ccdsGene.hg19.jan2014.sqlite'
-#FEATURES = '/home/pawels/Work/mgm-projects/test-data/ccdsGene.hg19.jan2014.sqlite'
-.libPaths('/export/astrakanfs/stefanj/R/library')
+VERSION <- '1.2-Feb2014'
 
+FEATURES <- '/export/astrakanfs/stefanj/reference/ccdsGene.hg19.jan2014.sqlite'
+#FEATURES <- '/home/pawels/Work/mgm-projects/test-data/ccdsGene.hg19.jan2014.sqlite'
+
+.libPaths('/export/astrakanfs/stefanj/R/library')
 suppressMessages(require(Rsamtools,quiet=TRUE))
 suppressMessages(require(multicore,quiet=TRUE))
 suppressMessages(require(GenomicFeatures,quiet=TRUE))
@@ -12,7 +14,8 @@ suppressMessages(require(GenomicRanges,quiet=TRUE))
 suppressMessages(require(biomaRt,quiet=TRUE))
 options(error=traceback)
 
-VERSION <- '1.1-Jan2014'
+source('shared_functions.R')
+
 
 args <- commandArgs(trailingOnly = TRUE)
 bam <- args[1]
@@ -33,7 +36,7 @@ genes_info <- getBM(attributes = c("hgnc_symbol","chromosome_name","start_positi
 
 # To update database uncomment the next 3 lines.
 # txdb <- makeTranscriptDbFromUCSC(genome='hg19',tablename='ccdsGene')
-# saveFeatures(txdb,'/export/astrakanfs/stefanj/reference/ccdsGene.hg19.<date>.sqlite')
+# saveFeatures(txdb,'<PATH>/ccdsGene.hg19.<date>.sqlite')
 # stop('finished')
 txdb = loadDb(FEATURES)
 
@@ -51,6 +54,7 @@ for (i in 1:length(genes)) {
 	info <- subset(genes_info, hgnc_symbol == genes[i])
 	# Remove any references to Locus Reference Genomic locations
 	info <- subset(info, !grepl("LRG", chromosome_name))
+  
 	if (dim(info)[1] > 0) {
 		#focus on the gene region
 		chr <- info$chromosome_name
@@ -68,9 +72,9 @@ for (i in 1:length(genes)) {
 		number.exons <- length(hg19.exons)
 
 		#intersect the transcript range with the actual reads reported, to calculate coverage
-    chr_nr=paste('chr',chr,sep='')
-		coverage.transcripts <- Views(coverage(bamRegion,width=end)[chr_nr],as(hg19.transcripts,"RangesList")[chr_nr])
-		coverage.exons <- Views(coverage(bamRegion,width=end)[chr_nr],as(hg19.exons,"RangesList")[chr_nr])
+    chrNr=paste('chr',chr,sep='')
+		coverage.transcripts <- Views(coverage(bamRegion,width=end)[chrNr],as(hg19.transcripts,"RangesList")[chrNr])
+		coverage.exons <- Views(coverage(bamRegion,width=end)[chrNr],as(hg19.exons,"RangesList")[chrNr])
 
 		#The mean is the weighted mean
 		coverage.exon.means <- viewMeans(coverage.exons)[[1]]%*%width(coverage.exons)[[1]]/sum(width(coverage.exons)[[1]])
@@ -94,8 +98,9 @@ for (i in 1:length(genes)) {
 		cat("List of exons:")
 		cat("\n")
 		cat(paste('chromosome','start','end', 'mean_coverage','>10X','>20X','>30X','\n',sep='\t'))
+    
 		for (j in 1:number.exons) {
-			meanCoverage <- formatC(unlist(elementMetadata(hg19.exons[j]), use.names=F)$mean_coverage[j], digits=2,format="f")
+			meanCoverage <- formatC(unlist(elementMetadata(hg19.exons[j]),use.names=F)$mean_coverage[j],digits=2,format="f")
       chromstart <- as.data.frame(hg19.exons)[j,][2]
       chromend <- as.data.frame(hg19.exons)[j,][3]
 			exon_size <- sum(width(coverage.exons[[1]][[j]]))
