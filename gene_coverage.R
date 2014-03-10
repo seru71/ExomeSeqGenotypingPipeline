@@ -1,3 +1,4 @@
+#!/usr/bin/Rscript
 # Rscript for coverage statistics for a list of genes in a sample
 # Rscript coverage.R '<full path to bam file>' geneA geneB geneX minCoverage
 
@@ -14,7 +15,10 @@ suppressMessages(require(GenomicRanges,quiet=TRUE))
 suppressMessages(require(biomaRt,quiet=TRUE))
 options(error=traceback)
 
-source('shared_functions.R')
+# get the curr dir and source shared functions
+args <- commandArgs(trailingOnly = FALSE)
+script.basename <- dirname(sub('--file=', '', args[grep('--file=', args)]))
+source(paste(script.basename, 'shared_functions.R',sep='/'))
 
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -72,7 +76,7 @@ for (i in 1:length(genes)) {
 		number.exons <- length(hg19.exons)
 
 		#intersect the transcript range with the actual reads reported, to calculate coverage
-    chrNr=paste('chr',chr,sep='')
+		chrNr=paste('chr',chr,sep='')
 		coverage.transcripts <- Views(coverage(bamRegion,width=end)[chrNr],as(hg19.transcripts,"RangesList")[chrNr])
 		coverage.exons <- Views(coverage(bamRegion,width=end)[chrNr],as(hg19.exons,"RangesList")[chrNr])
 
@@ -101,8 +105,8 @@ for (i in 1:length(genes)) {
     
 		for (j in 1:number.exons) {
 			meanCoverage <- formatC(unlist(elementMetadata(hg19.exons[j]),use.names=F)$mean_coverage[j],digits=2,format="f")
-      chromstart <- as.data.frame(hg19.exons)[j,][2]
-      chromend <- as.data.frame(hg19.exons)[j,][3]
+      			chromstart <- as.data.frame(hg19.exons)[j,][2]
+			chromend <- as.data.frame(hg19.exons)[j,][3]
 			exon_size <- sum(width(coverage.exons[[1]][[j]]))
 			exon_10X <- sum(width(slice(coverage.exons[[1]][[j]], lower=10))) / exon_size
 			exon_20X <- sum(width(slice(coverage.exons[[1]][[j]], lower=20))) / exon_size
