@@ -20,7 +20,13 @@ getSpecificRegion <- function(chr, ### chromosome
                               chrEnd,  ### end position (bp)
                               bamFile ### bam file
                               ) {
-  
+
+
+  # if bam has chr coordinates with "chr" prefix
+  if (length(grep("chr",seqnames(seqinfo(BamFile(bamFile))),ignore.case=T)) > 0) {    
+    chr <- paste("chr",chr,sep="") 
+  }
+
   param <- ScanBamParam(what = c("rname", "strand","pos", "qwidth"),
                         which = GRanges(chr,IRanges(chrStart, chrEnd)),
                         flag = scanBamFlag(isUnmappedQuery = FALSE)
