@@ -357,7 +357,7 @@ def bam_coverage_statistics(bam, statistics):
             ))
 
 def bam_coverage_multisample_statistics(bams, output):
-    cmd = "{java} -Xmx16g -jar {gatk} \
+    cmd = "{java} -Xmx32g -jar {gatk} \
             -R {reference} \
             -T DepthOfCoverage \
             -o {output} \
