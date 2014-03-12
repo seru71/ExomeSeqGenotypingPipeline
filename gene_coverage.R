@@ -12,6 +12,7 @@ suppressMessages(require(GenomicRanges,quiet=TRUE))
 suppressMessages(require(biomaRt,quiet=TRUE))
 options(error=traceback)
 
+# get the curr dir and source shared functions
 args <- commandArgs(trailingOnly = FALSE)
 script.basename <- dirname(sub('--file=', '', args[grep('--file=', args)]))
 source(paste(script.basename, 'shared_functions.R',sep='/'))

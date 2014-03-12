@@ -1,3 +1,4 @@
+#!/usr/bin/Rscript
 # Rscript for coverage statistics and number of features in a region of a bam file
 # Rscript coverage.R '/export/astrakanfs/mpesj/Agilent/1040PRN0046_GRCh37.gatk.bam' 7 36399490 55889334 8
 
@@ -13,6 +14,7 @@ suppressMessages(require(GenomicFeatures,quiet=TRUE))
 suppressMessages(require(GenomicRanges,quiet=TRUE))
 suppressMessages(require(SynergizeR,quiet=TRUE))
 
+# get the curr dir and source shared functions
 args <- commandArgs(trailingOnly = FALSE)
 script.basename <- dirname(sub('--file=', '', args[grep('--file=', args)]))
 source(paste(script.basename, 'shared_functions.R',sep='/'))
