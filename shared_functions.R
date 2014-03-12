@@ -21,6 +21,11 @@ getSpecificRegion <- function(chr, ### chromosome
                               bamFile ### bam file
                               ) {
   
+  # if bam has chromosome names with "chr" prefix
+  if (length(grep("chr",seqnames(seqinfo(BamFile(bamFile))),ignore.case=T)) > 0) {    
+    chr <- paste("chr",chr,sep="") 
+  }
+  
   param <- ScanBamParam(what = c("rname", "strand","pos", "qwidth"),
                         which = GRanges(chr,IRanges(chrStart, chrEnd)),
                         flag = scanBamFlag(isUnmappedQuery = FALSE)
@@ -28,10 +33,7 @@ getSpecificRegion <- function(chr, ### chromosome
   
   x <- scanBam(bamFile, param = param)[[1]]
   ranges = GRanges(seqnames=Rle(x$rname), ranges=IRanges(x$pos, width=x$qwidth))
-  seqlevels(ranges) <- sub("^(\\d+)","chr\\1",seqlevels(ranges))
+  #seqlevels(ranges) <- sub("^(\\d+)","chr\\1",seqlevels(ranges))
   ranges
-  # coverage(ranges)
-  #coverage(IRanges(x[["pos"]], width = x[["qwidth"]]))
-  ### coverage IRLe object
 }
 

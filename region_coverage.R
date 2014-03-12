@@ -3,8 +3,8 @@
 
 VERSION <- '1.3-Feb2014'
 
-FEATURES <- '/export/astrakanfs/stefanj/reference/ccdsGene.hg19.jan2014.sqlite'
-#FEATURES <- '/home/pawels/Work/mgm-projects/test-data/ccdsGene.hg19.jan2014.sqlite'
+FEATURES <- '/export/astrakanfs/stefanj/reference/ccdsGene.hg19.mar2014.sqlite'
+#FEATURES <- '/home/pawels/Work/mgm-projects/test-data/ccdsGene.hg19.mar2014.sqlite'
 
 .libPaths('/export/astrakanfs/stefanj/R/library')
 suppressMessages(require(Rsamtools,quiet=TRUE))
@@ -13,7 +13,9 @@ suppressMessages(require(GenomicFeatures,quiet=TRUE))
 suppressMessages(require(GenomicRanges,quiet=TRUE))
 suppressMessages(require(SynergizeR,quiet=TRUE))
 
-source('shared_functions.R')
+args <- commandArgs(trailingOnly = FALSE)
+script.basename <- dirname(sub('--file=', '', args[grep('--file=', args)]))
+source(paste(script.basename, 'shared_functions.R',sep='/'))
 
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -31,6 +33,7 @@ minCoverage <- as.integer(args[5])
 # minCoverage<-8
 createBamIndex(bam)
 bamRegion <- getSpecificRegion(chr,start,end,bam)
+seqlevels(bamRegion) <- sub("^(\\d+)","chr\\1",seqlevels(bamRegion))
 
 # To update the ccds gene database uncomment the 3 lines below.
 # txdb <- makeTranscriptDbFromUCSC(genome='hg19',tablename='ccdsGene')
@@ -43,10 +46,10 @@ region <- GRanges(chr,IRanges(start, end))
 seqlevels(region) <- sub("^(\\d+)","chr\\1",seqlevels(region))
 
 hg19.transcripts <- transcriptsByOverlaps(txdb,region)
-hg19.exons <- exonsByOverlaps(txdb,region)
-
 size.transcripts <- sum(width(hg19.transcripts))
 number.transcripts <- length(hg19.transcripts)
+
+hg19.exons <- exonsByOverlaps(txdb,region)
 number.exons <- length(hg19.exons)
 
 #intersect the transcript range with the actual reads reported, to calculate coverage
@@ -62,14 +65,14 @@ elementMetadata(hg19.transcripts)$mean_coverage <- as.vector(viewMeans(coverage.
 elementMetadata(hg19.exons)$mean_coverage <- as.vector(viewMeans(coverage.exons))
 
 transcripts.less_than_minimum.covered <- length(which(unlist(elementMetadata(hg19.transcripts)$mean_coverage[1],use.names=F) < minCoverage))
-exons.less_than_minimum <- hg19.exons[unlist(elementMetadata(hg19.exons)$mean_coverage[1],use.names=F) < minCoverage]
-exons.less_than_minimum.covered <- length(exons.less_than_minimum)
+exons.low_cvrg <- hg19.exons[unlist(elementMetadata(hg19.exons)$mean_coverage[1],use.names=F) < minCoverage]
+exons.low_cvrg.number <- length(exons.low_cvrg)
 
-transcripts.pct = round(transcripts.less_than_minimum.covered/number.transcripts*100)
-exons.pct = round(exons.less_than_minimum.covered/number.exons*100)
+transcripts.less_than_minimum_covered.percent = round(transcripts.less_than_minimum.covered/number.transcripts*100)
+exons.low_cvrg.percent = round(exons.low_cvrg.number/number.exons*100)
 
 #exon to transcripts mapping
-exons_to_transcripts <- as.matrix(findOverlaps(exons.less_than_minimum,hg19.transcripts))
+exons_to_transcripts <- as.matrix(findOverlaps(exons.low_cvrg,hg19.transcripts))
 exons_to_transcripts[,2] <- elementMetadata(hg19.transcripts[exons_to_transcripts[, 2]])[, "tx_name"]
 #which(exons_to_transcripts[,1] == '181')
 #translate to hgnc_symbols from ccds transcript id's
@@ -92,18 +95,18 @@ cat('List of genes in region:\n')
 cat(as.vector(unique(transcripts_to_genes$hgnc[transcripts_to_genes$hgnc != "NA"])))
 cat('\n')
 # cat('Number and % of transcripts covered at mean < 8X:\n')
-# cat(paste('n=',transcripts.less_than_minimum.covered,', ',transcripts.pct,'% of target.\n',sep=''))
+# cat(paste('n=',transcripts.less_than_minimum.covered,', ',transcripts.less_than_minimum_covered.percent,'% of target.\n',sep=''))
 cat(paste('Number and % of exons covered at mean < ',minCoverage,'X:\n',sep=''))
-cat(paste('n=',exons.less_than_minimum.covered,', ',exons.pct,'% of target.\n',sep=''))
+cat(paste('n=',exons.low_cvrg.number,', ',exons.low_cvrg.percent,'% of target.\n',sep=''))
 
-if (exons.less_than_minimum.covered > 0) {
+if (exons.low_cvrg.number > 0) {
     cat('\nList of poor coverage exons in region:\n')
     cat(paste('chromosome','start','end', 'mean_coverage','hgnc_symbol','transcript_id\n',sep='\t'))
 
-    results <- as.data.frame(exons.less_than_minimum)
-    for(i in 1:exons.less_than_minimum.covered) {
-        #meanCoverage <- formatC(unlist(elementMetadata(exons.less_than_minimum[i])[1,"mean_coverage"],use.names=F),digits=2)
-        meanCoverage=unlist(exons.less_than_minimum$mean_coverage[1],use.names=F)[i]
+    results <- as.data.frame(exons.low_cvrg)
+    for(i in 1:exons.low_cvrg.number) {
+        #meanCoverage <- formatC(unlist(elementMetadata(exons.low_cvrg[i])[1,"mean_coverage"],use.names=F),digits=2)
+        meanCoverage=unlist(exons.low_cvrg$mean_coverage[1],use.names=F)[i]
         transcripts <- exons_to_transcripts[which(exons_to_transcripts[,1] == i),2]
         genes <- c()
         for (transcript in exons_to_transcripts[which(exons_to_transcripts[,1] == i),2]) {
