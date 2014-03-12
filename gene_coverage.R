@@ -62,12 +62,10 @@ for (i in 1:length(genes)) {
     number.exons <- nrow(as.data.frame(exons))
     
     #intersect the transcript range with the actual reads reported, to calculate coverage
-    coverage.exons <- unlist(Views(coverage(bamRegion)[chr],  #, width=max(info$genomic_coding_end)
-                            as(exons,"RangesList")[chr]))
+    coverage.exons <- Views(coverage(bamRegion)[chr], as(exons,"RangesList")[chr])[[1]] #, width=max(info$genomic_coding_end)
     
     # calc coverage on merged overlapping exons for the purpose of correct gene-wide cvrg calculation
-    coverage.merged.exons <- unlist(Views(coverage(bamRegion)[chr],  #, width=max(info$genomic_coding_end)
-                                          as(reduce(exons),"RangesList")[chr]))
+    coverage.merged.exons <- Views(coverage(bamRegion)[chr], as(reduce(exons),"RangesList")[chr])[[1]]
     
     #The mean is the weighted mean
     gene.mean.coverage <- viewMeans(coverage.merged.exons)%*%width(coverage.merged.exons)/sum(width(coverage.merged.exons))
