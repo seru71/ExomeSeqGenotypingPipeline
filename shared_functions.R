@@ -34,6 +34,7 @@ getSpecificRegion <- function(chr, ### chromosome
   x <- scanBam(bamFile, param = param)[[1]]
   ranges = GRanges(seqnames=Rle(x$rname), ranges=IRanges(x$pos, width=x$qwidth))
   #seqlevels(ranges) <- sub("^(\\d+)","chr\\1",seqlevels(ranges))
+  seqlevels(ranges) <- sub("^chr","",seqlevels(ranges))
   ranges
 }
 
