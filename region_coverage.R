@@ -8,10 +8,8 @@ FEATURES <- '/export/astrakanfs/stefanj/reference/ccdsGene.hg19.mar2014.sqlite'
 #FEATURES <- '/home/pawels/Work/mgm-projects/test-data/ccdsGene.hg19.mar2014.sqlite'
 
 .libPaths('/export/astrakanfs/stefanj/R/library')
-suppressMessages(require(Rsamtools,quiet=TRUE))
 suppressMessages(require(multicore,quiet=TRUE))
 suppressMessages(require(GenomicFeatures,quiet=TRUE))
-suppressMessages(require(GenomicRanges,quiet=TRUE))
 suppressMessages(require(SynergizeR,quiet=TRUE))
 
 # get the curr dir and source shared functions
