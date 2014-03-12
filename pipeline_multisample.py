@@ -356,6 +356,25 @@ def bam_coverage_statistics(bam, statistics):
                 capture=capture
             ))
 
+def bam_coverage_multisample_statistics(bams, output):
+    cmd = "{java} -Xmx32g -jar {gatk} \
+            -R {reference} \
+            -T DepthOfCoverage \
+            -o {output} \
+            -L {capture} \
+            -ct 8 -ct 20 -ct 30 \
+            --omitDepthOutputAtEachBase --omitLocusTable \
+	    ".format(java=java, gatk=gatk,
+                reference=reference,
+                output=output,
+                capture=capture)
+
+    for bam in bams:
+	cmd += " -I {}".format(bam)
+
+    run_cmd(cmd)
+
+
 def filter_by_exome_region(vcf, output):
     """Apply filters to the vcf file to limit calling to exome region"""
     run_cmd("vcftools --vcf %s \
@@ -793,6 +812,12 @@ def recalibrate_baseq2(inputs, output):
     print_recalibrated(inputs[0], inputs[1], output)
     # remove(inputs[0])
 
+
+#
+#
+# QC measurements
+#
+
 #@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.quality_score')
 def metric_quality_score_distribution(input,output):
@@ -809,6 +834,17 @@ def metric_alignment(input,output):
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.coverage.sample_summary', r'\1.coverage')
 def metric_coverage(input, output, output_format):
     bam_coverage_statistics(input,output_format)
+
+@merge(recalibrate_baseq2, 'multisample.coverage')
+def metric_coverage_multisample(bams, output):
+    bam_coverage_multisample_statistics(bams, output)
+
+
+#
+#
+# bam reduce & variant calling
+#
+
 
 @jobs_limit(6)
 #@follows(recalibrate_baseq2)
