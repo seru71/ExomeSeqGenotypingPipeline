@@ -52,7 +52,7 @@ get.gene.info <- function(gene) {
   #load ensembl mart
   if (is.na(human)) {
     cat('Getting mart...')
-    human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+    human <<- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
     cat('done.\n')
   }
   gene_info <- getBM(
