@@ -1,5 +1,7 @@
 
-.libPaths('/export/astrakanfs/stefanj/R/library')
+if (file.exists('/export/astrakanfs')) {
+  .libPaths('/export/astrakanfs/stefanj/R/library')
+}
 suppressMessages(require(Rsamtools,quiet=TRUE))
 suppressMessages(require(GenomicRanges,quiet=TRUE))
 suppressMessages(require(biomaRt,quiet=TRUE))
@@ -27,6 +29,8 @@ getSpecificRegion <- function(chr, ### chromosome
                               bamFile ### bam file
                               ) {
   
+  createBamIndex(bamFile)
+
   # if bam has chromosome names with "chr" prefix
   if (length(grep("chr",seqnames(seqinfo(BamFile(bamFile))),ignore.case=T)) > 0) {    
     chr <- paste("chr",chr,sep="") 
@@ -50,7 +54,7 @@ human=NA
 get.gene.info <- function(gene) {
   
   #load ensembl mart
-  if (is.na(human)) {
+  if (!isS4(human)) {
     cat('Getting mart...')
     human <<- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
     cat('done.\n')

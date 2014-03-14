@@ -16,9 +16,6 @@ args <- commandArgs(trailingOnly = TRUE)
 bam <- args[1]
 genes <- args[2:length(args)]
 
-# create index file if it does not exist
-createBamIndex(bam)
-
 cat('Script version', VERSION,'\n')
 cat('Sample', bam,'\n')
 cat('Candidate Genes: ')
@@ -45,14 +42,14 @@ for (gene in genes) {
     cat("\n")
     cat("List of exons:")
     cat("\n")
-    cat(paste('chromosome','start','end', 'mean_coverage','>10X','>20X','>30X','\n',sep='\t'))
+    cat(paste('chromosome','start','end', 'mean_coverage','%bp>10X','%bp>20X','%bp>30X','\n',sep='\t'))
     
     for (j in 2:ncol(cvrg.df)) {
       cat(paste(stats[['ensembl_gene_record']]$chromosome_name[1], 
                 stats[['ensembl_gene_record']]$genomic_coding_start[j-1], 
                 stats[['ensembl_gene_record']]$genomic_coding_end[j-1], 
                 round(cvrg.df[1,j],2),
-                round(cvrg.df[2,j],2), round(cvrg.df[3,j],2), round(cvrg.df[4,j],2), '\n', sep="\t"))
+                round(cvrg.df[2,j],2)*100, round(cvrg.df[3,j],2)*100, round(cvrg.df[4,j],2)*100, '\n', sep="\t"))
     }
     
     cat('\n')
