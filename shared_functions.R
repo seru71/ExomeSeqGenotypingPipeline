@@ -1,7 +1,7 @@
 
 if (file.exists('/export/astrakanfs')) {
   .libPaths('/export/astrakanfs/stefanj/R/library')
-}
+} 
 suppressMessages(require(Rsamtools,quiet=TRUE))
 suppressMessages(require(GenomicRanges,quiet=TRUE))
 suppressMessages(require(biomaRt,quiet=TRUE))
@@ -67,6 +67,8 @@ get.gene.info <- function(gene) {
       mart=human)
   
   info <- subset(gene_info, external_gene_id == gene)
+  # Remove exons with unknown boundaries
+  info <- subset(info, !is.na(genomic_coding_start) & !is.na(genomic_coding_end))
   # Remove any references to Locus Reference Genomic locations
   info <- subset(info, !grepl("LRG", ensembl_gene_id))
   return(info)
