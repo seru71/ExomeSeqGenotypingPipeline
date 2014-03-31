@@ -10,7 +10,7 @@ genes=c("HADH","GLUD1","GCK","KCNJ11","INS","KLF11","BLK","SLC30A8",
 
 #genes=c("NeuroD1")
 
-#bams=c("2351-SJ-0001_S1.bam","2351-SJ-0002_S2.bam","2351-SJ-0003_S3.bam")
+#bams=paste('../test-data/',c("2351-SJ-0001_S1.bam","2351-SJ-0002_S2.bam","2351-SJ-0003_S3.bam"),sep="")
 bams=paste("/export/astrakanfs/stefanj/data/amplicon_based_Jan2014/",
            c(paste("2351-SJ-000",1:9,"_S",1:9,sep=""), paste("2351-SJ-00",10:96,"_S",10:96,sep="")),
            ".bam",sep="")
@@ -32,13 +32,14 @@ for (gene in genes) {
   for (bam in bams) {
     
     cat(paste(bam,"\n")) 
-        
+    bam.id = unlist(strsplit(tail(unlist(strsplit(bam,split="_")),n=1),split=".",fixed=T))[1]
+    
     stats <- get.gene.coverage.stats(gene,bam)[['coverage.stats']]
     number.exons = ncol(stats)-1
     
     if (bam == bams[1]) {  # the first bam
       if (PLOT) {
-	png(figure.name, width=(round(number.exons/30)+1)*1024, height=768)
+	      png(figure.name, width=(round(number.exons/30)+1)*1024, height=768)
       }
       par(mar=c(5,4,4,5))
       boxplot(as.list(rep(NA,number.exons)), xlab="Exons", ylim=c(1,Y_MAX), ylab="Mean coverage across samples", log="y")    
@@ -51,9 +52,12 @@ for (gene in genes) {
 
     # extend/plot per-exome stats 
     boxplot.data = c(boxplot.data, unlist(stats['mean coverage',(1:number.exons)+1]))   # mean cvrg for all exons
-    line.stats = unlist(stats[line.stat.name,(1:number.exons)+1])
-    points(10**(line.stats*log10(Y_MAX)), type='l', lwd=2, col='red')  # line.stat.name statistic for all exons
-    
+	  line.stats = unlist(stats[line.stat.name,(1:number.exons)+1])
+	  log.transformed.line.stats = 10**(line.stats*log10(Y_MAX))
+  	points(log.transformed.line.stats, type='l', lwd=2, col='red')  # line.stat.name statistic for all exons
+    # label points where <100% bp meets threshold
+  	text(x=c(1:number.exons), y=log.transformed.line.stats, labels=ifelse(line.stats<1.0,bam.id,""), col="red") 
+	
     # extend data for all-genes-boxplot
     mean.gene.cvrg[[gene]] <- c(mean.gene.cvrg[[gene]], stats['mean coverage','entire gene'])
   }
