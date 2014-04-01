@@ -117,8 +117,6 @@ get.gene.coverage.stats <- function(gene, bam) {
     coverage.exons <- Views(coverage(bamRegion)[chr], as(exons,"RangesList")[chr])[[1]] #, width=max(info$genomic_coding_end)
     
     for (j in 1:coverage.stats[['number.exons']]) {
-      exon.start <- as.data.frame(exons)[j,][2]
-      exon.end <- as.data.frame(exons)[j,][3]
       exon.size <- sum(width(coverage.exons[j]))
       
       cvrg.df[paste("exon",j)] <- c(as.vector(viewMeans(coverage.exons))[j],
