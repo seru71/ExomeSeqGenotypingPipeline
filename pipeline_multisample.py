@@ -37,6 +37,10 @@ capture = os.path.join(script_path,'../reference/Nimblegen_SeqCap_EZ_Exome_v2_37
 hapmap = os.path.join(script_path,'../reference/hapmap_3.3.b37.sites.vcf')
 omni = os.path.join(script_path,'../reference/1000G_omni2.5.b37.sites.vcf')
 mills = os.path.join(script_path,'../reference/Mills_and_1000G_gold_standard.indels.b37.vcf')
+# annovar reference dbs
+annovar_human_db = os.path.join(script_path,'../tools/annovar/humandb')
+annovar_1000genomes_eur = '1000g2012apr_eur'
+annovar_inhouse_db = 'common_inhouse_variants_jan2014.txt'
 
 n_cpus = 2
 
@@ -356,6 +360,7 @@ def bam_coverage_statistics(bam, statistics):
                 capture=capture
             ))
 
+# long running, memory demanding and not very useful
 def bam_coverage_multisample_statistics(bams, output):
     cmd = "{java} -Xmx32g -jar {gatk} \
             -R {reference} \
@@ -641,6 +646,41 @@ def cleanup_files():
             multisample.gatk.recalibratedSNPS.rawIndels.vcf.idx \
             ")
     
+
+###########
+# Annovar annotation / filtering
+###########
+
+
+def generate_annovar_input_files(multisample_vcf, output_prefix):
+    """ Based on multisample vcf file, generate per-sample input files for Annovar """
+    run_cmd("convert2annovar.pl {vcf} -format vcf4 -withzyg \
+	    -genoqual 3 -coverage 6 -allsample \
+	    -outfile {output}".format(vcf=multisample_vcf, output=output_prefix))
+	
+
+def filter_common_inhouse_variants(input, output):
+    """ Remove common inhouse variants, and 1kg EUR variants """
+    run_cmd("annotate_variation.pl -build hg19 -filter -dbtype generic -genericdbfile {inhouse} \
+	    -outfile {outfile} {input} {annodb}".format(
+		inhouse=annovar_inhouse_db, 
+		outfile=output, 
+		input=input, 
+		annodb=annovar_human_db))
+
+
+def filter_common_1kg_variants(input, output, maf=0.005):
+    """ Remove variants from 1kg project with allele frequency > maf """
+    run_cmd("annotate_variation.pl -build hg19 -filter -dbtype {eur1kg} \
+	    -maf {maf} -outfile {output} {input} {annodb}".format(
+		eur1kg=annovar_1000genomes_eur
+	    	maf=maf, 
+	    	output=output_prefix,
+		input=input, 
+		annodb=annovar_human_db))
+
+
+
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 
@@ -934,6 +974,40 @@ def split_snp_parameters():
 @files(split_snp_parameters)
 def split_snps(input, output, sample):
     split_variants_by_sample(input, sample, output)
+
+
+#
+#
+# annovar annotation
+#
+
+def annovar_parameters():
+    files = glob.glob(options.bam_dir + '/*.bam')
+    exome_vcf = 'multisample.gatk.analysisReady.exome.vcf'
+    for file in files:
+        prefix = os.path.splitext(os.path.basename(file))[0]
+        yield [exome_vcf, 'annotated-with-annovar/' + prefix + '.avinput', prefix]
+	
+
+@follows('final_calls')
+@files('multisample.gatk.analysisReady.exome.vcf','_')
+def prepare_annovar_inputs(input, output):
+    generate_annovar_input_files(input, output)
+
+
+@follows('prepare_annovar_inputs')
+@files(annovar_parameters()
+	, suffix('.avinput'),['.hg19_generic_filtered','.hg19_generic_dropped'])
+def filter_common_inhouse(input, output):
+    filter_common_inhouse_variants(input, output)
+    rename(input+'.common_inhouse.hg19_generic_dropped', input+'.common_inhouse_dropped')
+    rename(input+'.common_inhouse.hg19_generic_filtered', input+'.common_inhouse_filtered')
+    
+@transform(filter_out_common_inhouse, suffix('.common_inhouse_filtered'),['.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered'])
+def filter_common_1000genomes_variants(input, output):
+    filter_common_1000genomes_variants(input, output, maf=0.005)
+    
+
 
 
 
