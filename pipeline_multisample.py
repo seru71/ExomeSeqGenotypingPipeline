@@ -775,6 +775,10 @@ if __name__ == '__main__':
 # prefix to use during the runs will be the basename of the file minus extension
 # prefix = os.path.splitext(os.path.basename(bam_file))[0]
 
+def get_sample_ids():
+    files = glob.glob(options.bam_dir + '/*.bam')
+    return [ os.path.splitext(os.path.basename(file))[0] for file in files ]
+
 def generate_parameters():
     files = glob.glob(options.bam_dir + '/*.bam')
     parameters = []
@@ -963,8 +967,12 @@ def final_calls(input,output):
     filter_by_exome_region(input, output)
     rename('multisample.gatk.analysisReady.recode.vcf','multisample.gatk.analysisReady.exome.vcf')
 
-
 def split_snp_parameters():
+    exome_vcf = 'multisample.gatk.analysisReady.exome.vcf'
+    for id in get_sample_ids():
+        yield [exome_vcf, id + '/' + id + '.exome.vcf', id]
+
+def split_snp_parameters_old():
     files = glob.glob(options.bam_dir + '/*.bam')
     exome_vcf = 'multisample.gatk.analysisReady.exome.vcf'
     for file in files:
@@ -986,17 +994,23 @@ def split_snps(input, output, sample):
 
 @split(final_calls, 'annotated-with-annovar/*.avinput')
 def prepare_annovar_inputs(input, outputs):
-    mkdir('annotated-with-annovar')
+    """ create an annovar file for every sample """
+    os.mkdir('annotated-with-annovar')
     generate_annovar_input_files(input, output_prefix='annotated-with-annovar/sample')
 
+def split_annovar_parameters():
+    for id in get_sample_ids():
+        yield ['annotated-with-annovar/sample.' + id + '.avinput', 
+               'annotated-with-annovar/sample.' + id + '.avinput.common_inhouse_filtered']
 
-@transform(prepare_annovar_inputs, suffix('.avinput'), ['.avinput.common_inhouse_filtered','.avinput.common_inhouse_dropped'])
-#@files(annovar_parameters(), suffix('.avinput'), ['.hg19_generic_filtered','.hg19_generic_dropped'])
-def filter_common_inhouse(input, outputs):
+@follows(prepare_annovar_inputs)
+#@transform(prepare_annovar_inputs, suffix('.avinput'), ['.avinput.common_inhouse_filtered','.avinput.common_inhouse_dropped'])
+@files(split_annovar_parameters)
+def filter_common_inhouse(input, output):
     """ filter variants found in the inhouse database. OBS! output specifies the filename after rename """
     filter_common_inhouse_variants(input, output_prefix=input)
-    outputs_of_annovar = [o.replace('common_inhouse','hg19_generic') for o in outputs]
-    for i in range(0,2): rename(outputs_of_annovar[i], outputs[i])
+    output_of_annovar = output.replace('common_inhouse','hg19_generic')
+    rename(output_of_annovar, output)
     
     
 @transform(filter_common_inhouse, suffix('.common_inhouse_filtered'),
