@@ -652,11 +652,13 @@ def cleanup_files():
 ###########
 
 
-def generate_annovar_input_files(multisample_vcf, output_prefix):
+def generate_annovar_input_files(multisample_vcf, outputs, output_prefix="annotated-with-annovar"):
     """ Based on multisample vcf file, generate per-sample input files for Annovar """
     run_cmd("convert2annovar.pl {vcf} -format vcf4 -withzyg \
 	    -genoqual 3 -coverage 6 -allsample \
-	    -outfile {output}".format(vcf=multisample_vcf, output=output_prefix))
+	    -outfile {output_prefix}".format(
+        vcf=multisample_vcf, 
+        output_prefix=output_prefix))
 	
 
 def filter_common_inhouse_variants(input, output):
@@ -989,15 +991,13 @@ def annovar_parameters():
         yield [exome_vcf, 'annotated-with-annovar/' + prefix + '.avinput', prefix]
 	
 
-@follows('final_calls')
-@files('multisample.gatk.analysisReady.exome.vcf','_')
-def prepare_annovar_inputs(input, output):
-    generate_annovar_input_files(input, output)
+@split(final_calls, 'annotated-with-annovar/*.avinput')
+def prepare_annovar_inputs(input, outputs):
+    generate_annovar_input_files(input, outputs)
 
 
-@follows('prepare_annovar_inputs')
-@files(annovar_parameters()
-	, suffix('.avinput'),['.hg19_generic_filtered','.hg19_generic_dropped'])
+@transform(prepare_annovar_inputs, suffix('.avinput'), '.avinput.hg19_generic_filtered','.avinput.hg19_generic_dropped')
+#@files(annovar_parameters(), suffix('.avinput'), ['.hg19_generic_filtered','.hg19_generic_dropped'])
 def filter_common_inhouse(input, output):
     filter_common_inhouse_variants(input, output)
     rename(input+'.common_inhouse.hg19_generic_dropped', input+'.common_inhouse_dropped')
