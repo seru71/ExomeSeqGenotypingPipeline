@@ -652,7 +652,7 @@ def cleanup_files():
 ###########
 
 
-def generate_annovar_input_files(multisample_vcf, outputs, output_prefix="annotated-with-annovar/sample"):
+def generate_annovar_input_files(multisample_vcf, output_prefix="annotated-with-annovar/sample"):
     """ Based on multisample vcf file, generate per-sample input files for Annovar """
     run_cmd("convert2annovar.pl {vcf} -format vcf4 -withzyg -includeinfo \
 	    -genoqual 3 -coverage 6 -allsample \
@@ -671,13 +671,13 @@ def filter_common_inhouse_variants(input, output_prefix):
 		annodb=annovar_human_db))
 
 
-def filter_common_1kg_variants(input, output, maf=0.005):
+def filter_common_1kg_variants(input, output_prefix, maf=0.005):
     """ Remove variants from 1kg project with allele frequency > maf """
     run_cmd("annotate_variation.pl -build hg19 -filter -dbtype {eur1kg} \
-	    -maf {maf} -outfile {output} {input} {annodb}".format(
+	    -maf {maf} -outfile {output_prefix} {input} {annodb}".format(
 		eur1kg=annovar_1000genomes_eur,
 	    maf=maf, 
-	    output=output_prefix,
+	    output_prefix=output_prefix,
 		input=input, 
 		annodb=annovar_human_db))
 
@@ -982,36 +982,26 @@ def split_snps(input, output, sample):
 #
 # annovar annotation
 #
-
-def annovar_parameters():
-    files = glob.glob(options.bam_dir + '/*.bam')
-    exome_vcf = 'multisample.gatk.analysisReady.exome.vcf'
-    for file in files:
-        prefix = os.path.splitext(os.path.basename(file))[0]
-        yield [exome_vcf, 'annotated-with-annovar/' + prefix + '.avinput', prefix]
 	
 
 @split(final_calls, 'annotated-with-annovar/*.avinput')
 def prepare_annovar_inputs(input, outputs):
-    generate_annovar_input_files(input, outputs)
+    generate_annovar_input_files(input, output_prefix="annotated-with-annovar/sample")
 
 
 @transform(prepare_annovar_inputs, suffix('.avinput'), ['.avinput.common_inhouse_filtered','.avinput.common_inhouse_dropped'])
 #@files(annovar_parameters(), suffix('.avinput'), ['.hg19_generic_filtered','.hg19_generic_dropped'])
 def filter_common_inhouse(input, outputs):
     """ filter variants found in the inhouse database. OBS! output specifies the filename after rename """
-    print "AAAAAAAAA ", outputs
-    outputs_of_annovar = [o.replace('common_inhouse','hg19_generic') for o in outputs]
-    print "BBBBBBBBB ", output_for_annovar
     filter_common_inhouse_variants(input, output_prefix=input)
-    #rename(input+'.common_inhouse.hg19_generic_dropped', input+'.common_inhouse_dropped')
-    #rename(input+'.common_inhouse.hg19_generic_filtered', input+'.common_inhouse_filtered')
-    for i in range(0,2): rename(output_of_annovar[i], outputs[i])
+    outputs_of_annovar = [o.replace('common_inhouse','hg19_generic') for o in outputs]
+    for i in range(0,2): rename(outputs_of_annovar[i], outputs[i])
     
     
-@transform(filter_common_inhouse, suffix('.common_inhouse_filtered'),['.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered'])
+@transform(filter_common_inhouse, suffix('.common_inhouse_filtered'),
+           ['.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered','.common_inhouse_filtered.hg19_EUR.sites.2012_04_dropped'])
 def filter_common_1000genomes_variants(input, output):
-    filter_common_1000genomes_variants(input, output, maf=0.005)
+    filter_common_1000genomes_variants(input, output_prefix=input, maf=0.005)
     
 
 
