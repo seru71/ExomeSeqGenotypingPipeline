@@ -991,7 +991,7 @@ def split_snps(input, output, sample):
 # annovar annotation
 #
 	
-
+#@follows(final_calls)
 @split(final_calls, 'annotated-with-annovar/*.avinput')
 def prepare_annovar_inputs(input, outputs):
     """ create an annovar file for every sample """
@@ -1011,12 +1011,14 @@ def filter_common_inhouse(input, output):
     filter_common_inhouse_variants(input, output_prefix=input)
     output_of_annovar = output.replace('common_inhouse','hg19_generic')
     rename(output_of_annovar, output)
+    #
+    # delete or rename the dropped file
+    #
     
-    
-@transform(filter_common_inhouse, suffix('.common_inhouse_filtered'),
-           ['.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered','.common_inhouse_filtered.hg19_EUR.sites.2012_04_dropped'])
+#@follows(filter_common_inhouse)    
+@transform(filter_common_inhouse, suffix('.common_inhouse_filtered'),'.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered')
 def filter_common_1000genomes(input, output):
-    filter_common_1000genomes_variants(input[0], output_prefix=input[0], maf=0.005)
+    filter_common_1000genomes_variants(input, output_prefix=input, maf=0.005)
     
 
 
