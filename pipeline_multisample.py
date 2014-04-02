@@ -652,7 +652,7 @@ def cleanup_files():
 ###########
 
 
-def generate_annovar_input_files(multisample_vcf, output_prefix="annotated-with-annovar/sample"):
+def generate_annovar_input_files(multisample_vcf, output_prefix):
     """ Based on multisample vcf file, generate per-sample input files for Annovar """
     run_cmd("convert2annovar.pl {vcf} -format vcf4 -withzyg -includeinfo \
 	    -genoqual 3 -coverage 6 -allsample \
@@ -986,7 +986,8 @@ def split_snps(input, output, sample):
 
 @split(final_calls, 'annotated-with-annovar/*.avinput')
 def prepare_annovar_inputs(input, outputs):
-    generate_annovar_input_files(input, output_prefix="annotated-with-annovar/sample")
+    mkdir('annotated-with-annovar')
+    generate_annovar_input_files(input, output_prefix='annotated-with-annovar/sample')
 
 
 @transform(prepare_annovar_inputs, suffix('.avinput'), ['.avinput.common_inhouse_filtered','.avinput.common_inhouse_dropped'])
