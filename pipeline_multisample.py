@@ -671,7 +671,7 @@ def filter_common_inhouse_variants(input, output_prefix):
 		annodb=annovar_human_db))
 
 
-def filter_common_1kg_variants(input, output_prefix, maf=0.005):
+def filter_common_1000genomes_variants(input, output_prefix, maf=0.005):
     """ Remove variants from 1kg project with allele frequency > maf """
     run_cmd("annotate_variation.pl -build hg19 -filter -dbtype {eur1kg} \
 	    -maf {maf} -outfile {output_prefix} {input} {annodb}".format(
@@ -1000,8 +1000,8 @@ def filter_common_inhouse(input, outputs):
     
 @transform(filter_common_inhouse, suffix('.common_inhouse_filtered'),
            ['.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered','.common_inhouse_filtered.hg19_EUR.sites.2012_04_dropped'])
-def filter_common_1000genomes_variants(input, output):
-    filter_common_1000genomes_variants(input, output_prefix=input, maf=0.005)
+def filter_common_1000genomes(input, output):
+    filter_common_1000genomes_variants(input[0], output_prefix=input[0], maf=0.005)
     
 
 
