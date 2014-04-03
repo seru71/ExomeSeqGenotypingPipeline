@@ -1074,8 +1074,26 @@ def count_heterozygotes_in_chrX(infiles, table_file):
 @merge([annotate_function_of_raw_variants, annotate_function_of_rare_variants], 'all_samples_exonic_variant_stats.tsv')
 def produce_variant_stats_table(infiles, table_file):
     """ produce a table of per-sample counts of different type of exonic variants """
-    run_cmd("echo {} > {}".format(str(len(infiles))+" "+str(len(infiles[0])), table_file))
-    run_cmd("echo {} >> {}".format(infiles, table_file))
+    # split the input files per task
+    sample_no = len(infiles)/2
+    raw_variant_files = infiles[0:sample_no]
+    rare_variant_files = infiles[sample_no:]
+
+    sample_ids = get_sample_ids()
+    out = open(table_file,'w')    
+    out.write('sample\traw_exonic\traw_synonymous\trare_exonic\trare_synonymous\n')
+    for i in range(0,sample_no):
+	out.write(sample_ids[i]+'\t')
+	f=open(raw_variant_files[i][1]	# exonic variant stats
+	# read values and write to out
+	f.close()
+	f = open(rare_variant_files[i][3]   # exonic variant stats
+	# read values and write to out
+	f.close()	
+    out.close()
+#    run_cmd("echo {} > {}".format(str(len(infiles))+" "+str(len(infiles[0])), table_file))
+#    run_cmd("echo {} >> {}".format(infiles, table_file))
+
 
 @follows(count_heterozygotes_in_chrX, produce_variant_stats_table)
 def variant_qc():
