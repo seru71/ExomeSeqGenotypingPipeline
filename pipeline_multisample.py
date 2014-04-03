@@ -996,50 +996,63 @@ def split_snps(input, output, sample):
 # annovar annotation
 #
 	
-@subdivide(final_calls, 'annotated-with-annovar/*.avinput')
+#@subdivide(final_calls, 'annotated-with-annovar/*.avinput')
+@split(final_calls, 'annotated-with-annovar/*.avinput')
 def prepare_annovar_inputs(input, outputs):
     """ create an annovar file for every sample """
     os.mkdir('annotated-with-annovar')
     generate_annovar_input_files(input, output_prefix='annotated-with-annovar/sample')
 
-def split_annovar_parameters():
-    for id in get_sample_ids():
-        yield ['annotated-with-annovar/sample.' + id + '.avinput', 
-               'annotated-with-annovar/sample.' + id + '.avinput.common_inhouse_filtered',
-	       'annotated-with-annovar/sample.' + id + '.avinput.common_inhouse_dropped']
+#def split_annovar_parameters():
+#    for id in get_sample_ids():
+#        yield ['annotated-with-annovar/sample.' + id + '.avinput', 
+#               'annotated-with-annovar/sample.' + id + '.avinput.common_inhouse_filtered',
+#	       'annotated-with-annovar/sample.' + id + '.avinput.common_inhouse_dropped']
 
 @transform(prepare_annovar_inputs, suffix('.avinput'), ['.avinput.variant_function.stats','.avinput.exonic_variant_function.stats'])
 def annotate_function_of_raw_variants(input, outputs):
+    """ annotate functional change in raw variants """
     annotate_variants_with_functional_change(input_file=input, output_prefix=input)
     # calculate stats on files created by annovar - output files without ".stats" suffix
-    run_cmd("cut -f 1 {f} | sort | uniq -c > {f}.stats".format(f=output[0][:-len('.stats')]))
-    run_cmd("cut -f 2 {f} | sort | uniq -c > {f}.stats".format(f=output[1][:-len('.stats')]))
+    run_cmd("cut -f 1 {f} | sort | uniq -c > {f}.stats".format(f=outputs[0][:-len('.stats')]))
+    run_cmd("cut -f 2 {f} | sort | uniq -c > {f}.stats".format(f=outputs[1][:-len('.stats')]))
     # remove the annovar files
-    remove(output[0][:-6])
-    remove(output[1][:-6])
+    remove(outputs[0][:-len('.stats')])
+    remove(outputs[1][:-len('.stats')])
 
 #@follows(prepare_annovar_inputs)
 #@files(split_annovar_parameters)
-@transform(prepare_annovar_inputs, suffix('.avinput'), '.avinput.common_inhouse_filtered', '.avinput.common_inhouse_dropped')
-def filter_common_inhouse(input, output_filtered, output_dropped):
+@transform(prepare_annovar_inputs, suffix('.avinput'), 
+					['.avinput.common_inhouse_filtered', 
+					 '.avinput.common_inhouse_dropped'])
+def filter_common_inhouse(input, outputs):
     """ filter variants found in the inhouse database. OBS! output specifies the filename after rename """
     filter_common_inhouse_variants(input, output_prefix=input)
-    for output_file in [output_filtered, output_dropped]: 
+    for output_file in outputs: 
 	rename(output_file.replace('common_inhouse','hg19_generic'), output_file)
+
     
-@transform(filter_common_inhouse, suffix('.common_inhouse_filtered'),'.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered')
-def filter_common_1000genomes(input, output):
+@transform(filter_common_inhouse, suffix('.common_inhouse_filtered'),
+					['.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered',
+					 '.common_inhouse_filtered.hg19_EUR.sites.2012_04_dropped'])
+def filter_common_1000genomes(inputs, outputs):
     """ filter common 1000 genomes variants """
-    filter_common_1000genomes_variants(input, output_prefix=input, maf=0.005)
+    filtered = inputs[0]                      # take only the filtered file, leave dropped
+    filter_common_1000genomes_variants(filtered, output_prefix=filtered, maf=0.005)
     
+
 @transform(filter_common_1000genomes, suffix('.hg19_EUR.sites.2012_04_filtered'), 
-	   ['.hg19_EUR.sites.2012_04_filtered.exonic_variant_function','.hg19_EUR.sites.2012_04_filtered.variant_function',
-	   ['.hg19_EUR.sites.2012_04_filtered.exonic_variant_function.stats','.hg19_EUR.sites.2012_04_filtered.variant_function.stats'])
-def annotate_function_of_rare_variants(input, outputs):
-    annotate_variants_with_functional_change(input_file=input, output_prefix=input)
-    # calculate stats on files created by annovar - output files without ".stats" suffix
-    run_cmd("cut -f 1 {f} | sort | uniq -c > {f}.stats".format(f=output[0]))
-    run_cmd("cut -f 2 {f} | sort | uniq -c > {f}.stats".format(f=output[1]))
+	   				['.hg19_EUR.sites.2012_04_filtered.variant_function',
+					 '.hg19_EUR.sites.2012_04_filtered.exonic_variant_function',
+					 '.hg19_EUR.sites.2012_04_filtered.variant_function.stats',
+					 '.hg19_EUR.sites.2012_04_filtered.exonic_variant_function.stats'])
+def annotate_function_of_rare_variants(inputs, outputs):
+    """ annotate functional change in rare variants """
+    filtered = inputs[0] 			# use only the filtered input file, leave dropped
+    annotate_variants_with_functional_change(input_file=filtered, output_prefix=filtered)
+    # calculate stats on files created by annovar
+    run_cmd("cut -f 1 {f} | sort | uniq -c > {f}.stats".format(f=outputs[0]))
+    run_cmd("cut -f 2 {f} | sort | uniq -c > {f}.stats".format(f=outputs[1]))
 
 #
 # QC on variant level
@@ -1047,22 +1060,26 @@ def annotate_function_of_rare_variants(input, outputs):
 
 @merge(prepare_annovar_inputs, 'heterozygotes_in_chrX.tsv')
 def count_heterozygotes_in_chrX(infiles, table_file):
+    """ produce a table of per-sample counts of heterozygotic variants in chrX """
     out = open(table_file, 'w')
     for fname in infiles:
 	cnt=0
-	f.open(fname)
+	f = open(fname)
 	for l in f.xreadlines():
 	    lsplit=l.split()
 	    if lsplit[0] == 'X' and lsplit[5] == 'het': cnt+=1
-	out.write(os.path.basename(f)[:-len('.avinput')] + "\t" + str(cnt) + "\n")
+	out.write(os.path.basename(fname)[:-len('.avinput')] + "\t" + str(cnt) + "\n")
     out.close()
 
-@merge([annotate_function_of_raw_variants, annotate_function_of_rare_variants], ['all_samples_exonic_variant_stats.tbl'])
+@merge([annotate_function_of_raw_variants, annotate_function_of_rare_variants], 'all_samples_exonic_variant_stats.tsv')
 def produce_variant_stats_table(infiles, table_file):
-    print infiles,
+    """ produce a table of per-sample counts of different type of exonic variants """
+    run_cmd("echo {} > {}".format(str(len(infiles))+" "+str(len(infiles[0])), table_file))
+    run_cmd("echo {} >> {}".format(infiles, table_file))
 
-@follows([count_heterozygotes_in_chrX, produce_variant_stats_table])
-def variant_level_qc():
+@follows(count_heterozygotes_in_chrX, produce_variant_stats_table)
+def variant_qc():
+    """ empty task aggregating all variant QC tasks """
     pass
 
 
