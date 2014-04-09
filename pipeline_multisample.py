@@ -996,8 +996,8 @@ def split_snps(input, output, sample):
 # annovar annotation
 #
 	
-#@subdivide(final_calls, 'annotated-with-annovar/*.avinput')
-@split(final_calls, 'annotated-with-annovar/*.avinput')
+@subdivide(final_calls, 'annotated-with-annovar/*.avinput')
+#@split(final_calls, 'annotated-with-annovar/*.avinput')
 def prepare_annovar_inputs(input, outputs):
     """ create an annovar file for every sample """
     os.mkdir('annotated-with-annovar')
@@ -1081,16 +1081,26 @@ def produce_variant_stats_table(infiles, table_file):
 
     sample_ids = get_sample_ids()
     out = open(table_file,'w')    
-    out.write('sample\traw_exonic\traw_synonymous\trare_exonic\trare_synonymous\n')
+    out.write('sample\traw_exonic\trare_exonic\traw_synonymous\trare_synonymous\n')
     for i in range(0,sample_no):
-	out.write(sample_ids[i]+'\t')
-	f=open(raw_variant_files[i][1]	# exonic variant stats
-	# read values and write to out
-	f.close()
-	f = open(rare_variant_files[i][3]   # exonic variant stats
-	# read values and write to out
-	f.close()	
+        out.write(sample_ids[i])
+        for fname in [raw_variant_files[i][0], rare_variant_files[i][2]]: # exonic variant stats of raw variants and rare variants
+            f=open(fname)	
+            for l in f.xreadlines():
+                if l.find("exonic")>0:
+                    out.write('\t'+l.split()[0])
+                    break
+            f.close()
+        for f_name in [raw_variant_files[i][1], rare_variant_files[i][3]]:
+            f=open(fname)
+            for l in f.xreadlines():
+                if l.find(" synonymous")>0:
+                    out.write('\t'+l.split()[0])
+                    break            
+            f.close()
+        out.write('\n')
     out.close()
+       
 #    run_cmd("echo {} > {}".format(str(len(infiles))+" "+str(len(infiles[0])), table_file))
 #    run_cmd("echo {} >> {}".format(infiles, table_file))
 
