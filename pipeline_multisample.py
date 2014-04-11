@@ -655,8 +655,7 @@ def cleanup_files():
 def generate_annovar_input_files(multisample_vcf, output_prefix):
     """ Based on multisample vcf file, generate per-sample input files for Annovar """
     run_cmd("convert2annovar.pl {vcf} -format vcf4 -withzyg -includeinfo \
-	    -genoqual 3 -coverage 6 -allsample \
-	    -outfile {output_prefix}".format(
+	    -allsample -outfile {output_prefix}".format(
         vcf=multisample_vcf, 
         output_prefix=output_prefix))
 	
@@ -995,19 +994,13 @@ def split_snps(input, output, sample):
 #
 # annovar annotation
 #
-	
-@subdivide(final_calls, 'annotated-with-annovar/*.avinput')
-#@split(final_calls, 'annotated-with-annovar/*.avinput')
-def prepare_annovar_inputs(input, outputs):
-    """ create an annovar file for every sample """
-    os.mkdir('annotated-with-annovar')
-    generate_annovar_input_files(input, output_prefix='annotated-with-annovar/sample')
 
-#def split_annovar_parameters():
-#    for id in get_sample_ids():
-#        yield ['annotated-with-annovar/sample.' + id + '.avinput', 
-#               'annotated-with-annovar/sample.' + id + '.avinput.common_inhouse_filtered',
-#	       'annotated-with-annovar/sample.' + id + '.avinput.common_inhouse_dropped']
+@split(final_calls,'annotated-with-annovar/*.avinput') 
+def prepare_annovar_inputs(multisample_vcf, outputs):
+    """ create an annovar file for every sample. needs to be run separately from the rest"""
+    os.mkdir('annotated-with-annovar')
+    generate_annovar_input_files(multisample_vcf, output_prefix = 'annotated-with-annovar/sample')
+
 
 @transform(prepare_annovar_inputs, suffix('.avinput'), ['.avinput.variant_function.stats','.avinput.exonic_variant_function.stats'])
 def annotate_function_of_raw_variants(input, outputs):
@@ -1020,8 +1013,7 @@ def annotate_function_of_raw_variants(input, outputs):
     remove(outputs[0][:-len('.stats')])
     remove(outputs[1][:-len('.stats')])
 
-#@follows(prepare_annovar_inputs)
-#@files(split_annovar_parameters)
+
 @transform(prepare_annovar_inputs, suffix('.avinput'), 
 					['.avinput.common_inhouse_filtered', 
 					 '.avinput.common_inhouse_dropped'])
@@ -1091,7 +1083,7 @@ def produce_variant_stats_table(infiles, table_file):
                     out.write('\t'+l.split()[0])
                     break
             f.close()
-        for f_name in [raw_variant_files[i][1], rare_variant_files[i][3]]:
+        for fname in [raw_variant_files[i][1], rare_variant_files[i][3]]:
             f=open(fname)
             for l in f.xreadlines():
                 if l.find(" synonymous")>0:
@@ -1100,9 +1092,6 @@ def produce_variant_stats_table(infiles, table_file):
             f.close()
         out.write('\n')
     out.close()
-       
-#    run_cmd("echo {} > {}".format(str(len(infiles))+" "+str(len(infiles[0])), table_file))
-#    run_cmd("echo {} >> {}".format(infiles, table_file))
 
 
 @follows(count_heterozygotes_in_chrX, produce_variant_stats_table)
@@ -1121,7 +1110,8 @@ if __name__ == '__main__':
     if options.just_print:
         pipeline_printout(sys.stdout, options.target_tasks, options.forced_tasks,
 			    gnu_make_maximal_rebuild_mode = options.rebuild_mode,
-                            verbose=options.verbose)
+                            verbose=options.verbose,
+			    checksum_level = 0)
 
     elif options.flowchart:
         pipeline_printout_graph (   open(options.flowchart, "w"),
@@ -1137,5 +1127,6 @@ if __name__ == '__main__':
                             multiprocess    = options.jobs,
                             logger          = stderr_logger,
                             verbose         = options.verbose,
-                            gnu_make_maximal_rebuild_mode = options.rebuild_mode)
+                            gnu_make_maximal_rebuild_mode = options.rebuild_mode,
+			    checksum_level  = 0)
 
