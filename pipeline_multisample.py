@@ -602,7 +602,7 @@ def apply_recalibration_indels(vcf,recal,tranches,output):
                 num_jobs=options.jobs
             ))
 
-def filter_variants(vcf, output):
+def mark_filtered_variants(vcf, output):
     """filter vcf"""
     run_cmd('{java} -Xmx12g -jar {gatk} \
             -T VariantFiltration \
@@ -953,7 +953,7 @@ def apply_recalibration_filter_indels(input,output):
 @files('multisample.gatk.preHardFiltering.vcf', 'multisample.gatk.markedHardFiltering.vcf')
 def apply_filter(input,output):
     """docstring for apply_indel_filter"""
-    filter_variants(input,output)
+    mark_filtered_variants(input,output)
     # remove(input)
 
 @follows(apply_filter)
