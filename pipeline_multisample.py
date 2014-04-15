@@ -640,11 +640,11 @@ def cleanup_files():
             *.to_filter* multisample.gatk.snp.recal batch* \
             multisample.gatk.recalibratedSNPS.rawIndels.vcf \
             multisample.gatk.indel.model.* multisample.gatk.snp.model.* \
-            multisample.gatk.analysisReady.vcf \
             multisample.gatk.analysisReady.vcf.vcfidx \
             multisample.gatk.analysisReady.vcf.idx \
             multisample.gatk.recalibratedSNPS.rawIndels.vcf.idx \
             ")
+#            multisample.gatk.analysisReady.vcf \
     
 
 ###########
@@ -655,7 +655,7 @@ def cleanup_files():
 def generate_annovar_input_files(multisample_vcf, output_prefix):
     """ Based on multisample vcf file, generate per-sample input files for Annovar """
     run_cmd("convert2annovar.pl {vcf} -format vcf4 -withzyg -includeinfo \
-	    -allsample -outfile {output_prefix}".format(
+	    -genoqual 3 -coverage 6 -allsample -outfile {output_prefix}".format(
         vcf=multisample_vcf, 
         output_prefix=output_prefix))
 	
@@ -1060,7 +1060,7 @@ def count_heterozygotes_in_chrX(infiles, table_file):
 	for l in f.xreadlines():
 	    lsplit=l.split()
 	    if lsplit[0] == 'X' and lsplit[5] == 'het': cnt+=1
-	out.write(os.path.basename(fname)[:-len('.avinput')] + "\t" + str(cnt) + "\n")
+	out.write(os.path.basename(fname).split('.')[1] + "\t" + str(cnt) + "\n")
     out.close()
 
 @merge([annotate_function_of_raw_variants, annotate_function_of_rare_variants], 'all_samples_exonic_variant_stats.tsv')
@@ -1071,11 +1071,10 @@ def produce_variant_stats_table(infiles, table_file):
     raw_variant_files = infiles[0:sample_no]
     rare_variant_files = infiles[sample_no:]
 
-    sample_ids = get_sample_ids()
     out = open(table_file,'w')    
     out.write('sample\traw_exonic\trare_exonic\traw_synonymous\trare_synonymous\n')
     for i in range(0,sample_no):
-        out.write(sample_ids[i])
+        out.write(os.path.basename(raw_variant_files[i][0]).split('.')[1])
         for fname in [raw_variant_files[i][0], rare_variant_files[i][2]]: # exonic variant stats of raw variants and rare variants
             f=open(fname)	
             for l in f.xreadlines():
@@ -1083,7 +1082,7 @@ def produce_variant_stats_table(infiles, table_file):
                     out.write('\t'+l.split()[0])
                     break
             f.close()
-        for fname in [raw_variant_files[i][1], rare_variant_files[i][3]]:
+        for fname in [raw_variant_files[i][1], rare_variant_files[i][3]]: # synonymous variants stats of raw and rare variants
             f=open(fname)
             for l in f.xreadlines():
                 if l.find(" synonymous")>0:
