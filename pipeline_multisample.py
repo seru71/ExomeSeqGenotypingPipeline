@@ -1046,6 +1046,38 @@ def annotate_function_of_rare_variants(inputs, outputs):
     run_cmd("cut -f 1 {f} | sort | uniq -c > {f}.stats".format(f=outputs[0]))
     run_cmd("cut -f 2 {f} | sort | uniq -c > {f}.stats".format(f=outputs[1]))
 
+
+@transform(annotate_function_of_rare_variants, 
+           suffix('.avinput.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered.variant_function'),
+           ['.rare_coding_and_splicing.avinput', '.rare_coding_and_splicing.avinput.hg19_multianno.csv'])
+def produce_variant_annotation_table(inputs, outputs):
+    """ produce a table of various annotations per variant """
+    os.mkdir('annotated-with-annovar/annotated-tables')
+    
+    avinput = outputs[0]
+    rare_var_fun = inputs[0]
+    rare_ex_var_fun = inputs[1]
+    
+    # create input file for the table_annotation script
+    f_out = open(avinput,'w')
+    f = open(rare_ex_var_fun)
+    for l in f.xreadlines():
+        if l.split()[1] != 'synonymous SNV':
+            f_out.write(l.split()[4:]+'\n')
+    f.close()
+    f = open(rare_var_fun)
+    for l in f.xreadlines():
+        if l.split()[0] == 'splicing':
+            f_out.write(l.split()[3:]+'\n')
+    f.close()
+    f_out.close()
+    
+    # annotate all variants selected above
+    run_cmd("table_annovar.pl -protocol refGene,1000g2012apr_all,snp138,avsift,clinvar_20140211 \
+            -operation g,f,f,f,f -arg \'-splicing 4\',,,, -nastring NA -build hg19 -csvout -otherinfo \
+            -outfile {f} {f} {db}".format(f=outputs[1], db=annovar_human_db))
+
+
 #
 # QC on variant level
 ##
