@@ -1033,8 +1033,10 @@ def annotate_function_of_rare_variants(inputs, outputs):
 
 
 @transform(annotate_function_of_rare_variants, 
-           suffix('.avinput.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered.variant_function'),
-           ['.rare_coding_and_splicing.avinput', '.rare_coding_and_splicing.avinput.hg19_multianno.csv'])
+           formatter("sample.(?P<SAMPLE_NUM>.+).avinput.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered.variant_function", None, None, None),
+           #suffix('.avinput.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered.variant_function'),
+           ['{path[0]}/annotated-tables/{SAMPLE_NUM[0]}.rare_coding_and_splicing.avinput', 
+            '{path[0]}/annotated-tables/{SAMPLE_NUM[0]}.rare_coding_and_splicing.avinput.hg19_multianno.csv'])
 def produce_variant_annotation_table(inputs, outputs):
     """ produce a table of various annotations per variant """
     os.mkdir('annotated-with-annovar/annotated-tables')
