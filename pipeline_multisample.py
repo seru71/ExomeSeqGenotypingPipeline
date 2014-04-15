@@ -17,6 +17,7 @@
 import sys
 import os
 import glob
+import string
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 
@@ -1039,7 +1040,10 @@ def annotate_function_of_rare_variants(inputs, outputs):
             '{path[0]}/annotated-tables/{SAMPLE_NUM[0]}.rare_coding_and_splicing.avinput.hg19_multianno.csv'])
 def produce_variant_annotation_table(inputs, outputs):
     """ produce a table of various annotations per variant """
-    os.mkdir('annotated-with-annovar/annotated-tables')
+	
+    dir = 'annotated-with-annovar/annotated-tables'
+    if not os.path.exists(dir):
+	os.mkdir('annotated-with-annovar/annotated-tables')
     
     avinput = outputs[0]
     rare_var_fun = inputs[0]
@@ -1049,20 +1053,25 @@ def produce_variant_annotation_table(inputs, outputs):
     f_out = open(avinput,'w')
     f = open(rare_ex_var_fun)
     for l in f.xreadlines():
-        if l.split()[1] != 'synonymous SNV':
-            f_out.write(l.split()[4:]+'\n')
+	lsplit=l.split('\t')
+        if lsplit[1] != 'synonymous SNV':
+            f_out.write(string.join(lsplit[3:],'\t'))
     f.close()
     f = open(rare_var_fun)
     for l in f.xreadlines():
-        if l.split()[0] == 'splicing':
-            f_out.write(l.split()[3:]+'\n')
+	lsplit=l.split('\t')
+        if lsplit[0] == 'splicing':
+            f_out.write(string.join(lsplit[2:],'\t'))
     f.close()
     f_out.close()
     
     # annotate all variants selected above
     run_cmd("table_annovar.pl -protocol refGene,1000g2012apr_all,snp138,avsift,clinvar_20140211 \
             -operation g,f,f,f,f -arg \'-splicing 4\',,,, -nastring NA -build hg19 -csvout -otherinfo \
-            -outfile {f} {f} {db}".format(f=outputs[1], db=annovar_human_db))
+            -outfile {output_prefix} {input} {db}".format(
+	output_prefix=avinput, 
+	input=avinput, 
+	db=annovar_human_db))
 
 
 #
@@ -1077,7 +1086,7 @@ def count_heterozygotes_in_chrX(infiles, table_file):
 	cnt=0
 	f = open(fname)
 	for l in f.xreadlines():
-	    lsplit=l.split()
+	    lsplit=l.split('\t')
 	    if lsplit[0] == 'X' and lsplit[5] == 'het': cnt+=1
 	out.write(os.path.basename(fname).split('.')[1] + "\t" + str(cnt) + "\n")
     out.close()
