@@ -1035,7 +1035,6 @@ def annotate_function_of_rare_variants(inputs, outputs):
 
 @transform(annotate_function_of_rare_variants, 
            formatter("sample.(?P<SAMPLE_NUM>.+).avinput.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered.variant_function", None, None, None),
-           #suffix('.avinput.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered.variant_function'),
            ['{path[0]}/annotated-tables/{SAMPLE_NUM[0]}.rare_coding_and_splicing.avinput', 
             '{path[0]}/annotated-tables/{SAMPLE_NUM[0]}.rare_coding_and_splicing.avinput.hg19_multianno.csv'])
 def produce_variant_annotation_table(inputs, outputs):
@@ -1043,7 +1042,7 @@ def produce_variant_annotation_table(inputs, outputs):
 	
     dir = 'annotated-with-annovar/annotated-tables'
     if not os.path.exists(dir):
-	os.mkdir('annotated-with-annovar/annotated-tables')
+	os.mkdir(dir)
     
     avinput = outputs[0]
     rare_var_fun = inputs[0]
@@ -1078,18 +1077,60 @@ def produce_variant_annotation_table(inputs, outputs):
 # QC on variant level
 ##
 
-@merge(prepare_annovar_inputs, 'heterozygotes_in_chrX.tsv')
-def count_heterozygotes_in_chrX(infiles, table_file):
-    """ produce a table of per-sample counts of heterozygotic variants in chrX """
-    out = open(table_file, 'w')
+@merge(prepare_annovar_inputs, ['hetz_per_chr.tsv','homs_per_chr.tsv'])
+def count_hetz_and_homz_per_chr(infiles, table_files):
+    """ produce a table of sample vs chromosome counts of hetero- and homozygotic variants """
+
+    # the variant calls are expected to appear sorted by chromosome name in the following order
+    # any other order should trigger an exception
+    chromosomes = ['1','2','3','4','5','6','7','8','9',
+		   '10','11','12','13','14','15','16','17','18','19',
+		   '20','21','22','X','Y','GL000209.1']
+
+    hetz = open(table_files[0], 'w')
+    homz = open(table_files[1], 'w')
+    hetz.write('sample\t'+string.join(chromosomes,'\t')+'\n')
+    homz.write('sample\t'+string.join(chromosomes,'\t')+'\n')
     for fname in infiles:
-	cnt=0
+	sample_id=os.path.basename(fname).split('.')[1]
+	hetz.write(sample_id)
+	homz.write(sample_id)
+
+	het_cnt=0
+	hom_cnt=0
+	curr_chr=0
 	f = open(fname)
 	for l in f.xreadlines():
 	    lsplit=l.split('\t')
-	    if lsplit[0] == 'X' and lsplit[5] == 'het': cnt+=1
-	out.write(os.path.basename(fname).split('.')[1] + "\t" + str(cnt) + "\n")
-    out.close()
+	    while lsplit[0] != chromosomes[curr_chr] and curr_chr+1<len(chromosomes):
+		hetz.write("\t" + str(het_cnt))
+		homz.write("\t" + str(hom_cnt))
+		het_cnt=0
+		hom_cnt=0
+		curr_chr+=1
+	    # if the call is in a chromosome that is not in the list (or calls could be out of order)
+	    if lsplit[0] != chromosomes[curr_chr] and curr_chr+1 >= len(chromosomes):
+		raise Exception("Unrecognized or out-of-order chromosome: "+lsplit[0])
+	    
+	    if lsplit[5] == 'het': het_cnt+=1
+            elif lsplit[5] == 'hom': hom_cnt+=1
+            else:
+                raise Exception("Variant is not a het nor a hom")
+
+	f.close()
+
+	# flush out the counts for the last/remaining chromosomes
+        while curr_chr<len(chromosomes):
+	    hetz.write("\t" + str(het_cnt))
+            homz.write("\t" + str(hom_cnt))
+            het_cnt=0
+            hom_cnt=0 	    
+	    curr_chr+=1
+	hetz.write('\n')
+	homz.write('\n') 
+
+    hetz.close()
+    homs.close()
 
 @merge([annotate_function_of_raw_variants, annotate_function_of_rare_variants], 'all_samples_exonic_variant_stats.tsv')
 def produce_variant_stats_table(infiles, table_file):
@@ -1121,7 +1162,7 @@ def produce_variant_stats_table(infiles, table_file):
     out.close()
 
 
-@follows(count_heterozygotes_in_chrX, produce_variant_stats_table)
+@follows(count_hetz_and_homz_per_chr, produce_variant_stats_table)
 def variant_qc():
     """ empty task aggregating all variant QC tasks """
     pass
