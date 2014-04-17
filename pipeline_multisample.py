@@ -1077,7 +1077,7 @@ def produce_variant_annotation_table(inputs, outputs):
 # QC on variant level
 ##
 
-@merge(prepare_annovar_inputs, ['hetz_per_chr.tsv','homs_per_chr.tsv'])
+@merge(prepare_annovar_inputs, ['hetz_per_chr.tsv','homz_per_chr.tsv'])
 def count_hetz_and_homz_per_chr(infiles, table_files):
     """ produce a table of sample vs chromosome counts of hetero- and homozygotic variants """
 
@@ -1130,7 +1130,7 @@ def count_hetz_and_homz_per_chr(infiles, table_files):
 	homz.write('\n') 
 
     hetz.close()
-    homs.close()
+    homz.close()
 
 @merge([annotate_function_of_raw_variants, annotate_function_of_rare_variants], 'all_samples_exonic_variant_stats.tsv')
 def produce_variant_stats_table(infiles, table_file):
