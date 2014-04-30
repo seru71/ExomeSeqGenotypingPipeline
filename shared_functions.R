@@ -101,7 +101,8 @@ get.gene.coverage.stats <- function(gene, bam) {
     # whole gene stats
     #
     # calc coverage on merged overlapping exons for the purpose of correct gene-wide cvrg calculation
-    coverage.merged.exons <- Views(coverage(bamRegion)[chr], as(reduce(exons),"RangesList")[chr])[[1]]
+    # reduce sorts exons by coordinates which reverses the order of exons on the reverse strand, but for a gene-wide stat this is not important
+    coverage.merged.exons <- Views(coverage(bamRegion,width=max(info$genomic_coding_end))[chr], as(reduce(exons),"RangesList")[chr])[[1]]
     gene.length = sum(width(coverage.merged.exons))
     
     #The gene coverage mean is a weighted mean
@@ -114,7 +115,7 @@ get.gene.coverage.stats <- function(gene, bam) {
     # per exome stats
     #
     #intersect the transcript range with the actual reads reported, to calculate coverage
-    coverage.exons <- Views(coverage(bamRegion)[chr], as(exons,"RangesList")[chr])[[1]] #, width=max(info$genomic_coding_end)
+    coverage.exons <- Views(coverage(bamRegion, width=max(info$genomic_coding_end))[chr], as(exons,"RangesList")[chr])[[1]]
     
     for (j in 1:coverage.stats[['number.exons']]) {
       exon.size <- sum(width(coverage.exons[j]))

@@ -2,6 +2,13 @@
 # Rscript for coverage statistics for a list of genes in a sample
 # Rscript coverage.R '<full path to bam file>' geneA geneB geneX minCoverage
 
+#
+#
+# breaks on GRM6
+#
+#
+
+
 VERSION <- '1.3-Mar2014'
 
 #suppressMessages(require(multicore,quiet=TRUE))
@@ -44,10 +51,13 @@ for (gene in genes) {
     cat("\n")
     cat(paste('chromosome','start','end', 'mean_coverage','%bp>10X','%bp>20X','%bp>30X','\n',sep='\t'))
     
-    for (j in 2:ncol(cvrg.df)) {
-      cat(paste(stats[['ensembl_gene_record']]$chromosome_name[1], 
-                stats[['ensembl_gene_record']]$genomic_coding_start[j-1], 
-                stats[['ensembl_gene_record']]$genomic_coding_end[j-1], 
+    # coverage is calculated for unique exon cooridnates
+    exon.coords<-unique(stats[['ensembl_gene_record']][,c('chromosome_name','genomic_coding_start','genomic_coding_end')])
+    
+    for (j in 1:length(exon.coords)) {
+      cat(paste(exon.coords$chromosome_name[1], 
+                exon.coords$genomic_coding_start[j-1], 
+                exon.coords$genomic_coding_end[j-1], 
                 round(cvrg.df[1,j],2),
                 round(cvrg.df[2,j],2)*100, round(cvrg.df[3,j],2)*100, round(cvrg.df[4,j],2)*100, '\n', sep="\t"))
     }
