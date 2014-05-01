@@ -952,13 +952,26 @@ def split_snps(input, output, sample):
 # Annovar annotation / filtering
 ###########
 
-# annovar reference dbs
+# executables
+cadd_annotation_script = os.path.join(script_path, 'annotateWithCadd.py')
+
+# reference dbs
+cadd_scores_db = os.path.join(script_path,'../reference/CADD_wg_snvs.tsv.gz')
 annovar_human_db = os.path.join(script_path,'../tools/annovar/humandb')
 annovar_1000genomes_eur = '1000g2012apr_eur'
 annovar_inhouse_db = 'common_inhouse_variants_jan2014.txt'
 
 
-@split(final_calls,'annotated-with-annovar/*.avinput') 
+@transform(final_calls,suffix('.analysisReady.exome.vcf'),'.analysisReady.exome.with_CADD.vcf')
+def add_cadd_scores(input,output):
+    """Include cadd scores in the info field of the vcf"""
+    run_cmd("cat {input_vcf} | {script} -p {cadd_scores} > {output_vcf}".format(
+                input_vcf=input,
+                script=cadd_annotation_script,
+                cadd_scores=cadd_scores_db,
+                output_vcf=output))
+
+@split(add_cadd_scores,'annotated-with-annovar/*.avinput') 
 def prepare_annovar_inputs(multisample_vcf, outputs):
     """ create an annovar file for every sample. needs to be run separately from the rest"""
     os.mkdir('annotated-with-annovar')
