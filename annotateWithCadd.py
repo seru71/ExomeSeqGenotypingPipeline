@@ -3,7 +3,7 @@
 
 """
 
-:Author: Martin Kircher, modified by Paweł Sztromwasser
+:Author: Martin Kircher, modified by Pawel Sztromwasser
 :Contact: mkircher [at] uw.edu, pawel.sztromwasser [at] ii.uib.no
 :Date: *23.03.2014, modified 30.04.2014
 
