@@ -961,7 +961,7 @@ annovar_human_db = os.path.join(script_path,'../tools/annovar/humandb')
 annovar_1000genomes_eur = '1000g2012apr_eur'
 annovar_inhouse_db = 'common_inhouse_variants_jan2014.txt'
 
-
+# not used now as cadd is added by annovar
 @transform(final_calls,suffix('.analysisReady.exome.vcf'),'.analysisReady.exome.with_CADD.vcf')
 def add_cadd_scores(input,output):
     """Include cadd scores in the info field of the vcf"""
@@ -971,7 +971,7 @@ def add_cadd_scores(input,output):
                 cadd_scores=cadd_scores_db,
                 output_vcf=output))
 
-@split(add_cadd_scores,'annotated-with-annovar/*.avinput') 
+@split(final_calls,'annotated-with-annovar/*.avinput') 
 def prepare_annovar_inputs(multisample_vcf, outputs):
     """ create an annovar file for every sample. needs to be run separately from the rest"""
     os.mkdir('annotated-with-annovar')
@@ -1054,8 +1054,10 @@ def produce_variant_annotation_table(inputs, outputs):
     """ produce a table of various annotations per variant """
 	
     dir = 'annotated-with-annovar/annotated-tables'
-    if not os.path.exists(dir):
+    try:
 	os.mkdir(dir)
+    except (OSError):
+	pass # dir exists
     
     avinput = outputs[0]
     rare_var_fun = inputs[0]
@@ -1078,8 +1080,8 @@ def produce_variant_annotation_table(inputs, outputs):
     f_out.close()
     
     # annotate all variants selected above
-    run_cmd("table_annovar.pl -protocol refGene,1000g2012apr_all,snp138,avsift,clinvar_20140211 \
-            -operation g,f,f,f,f -arg \'-splicing 4\',,,, -nastring NA -build hg19 -csvout -otherinfo \
+    run_cmd("table_annovar.pl -protocol refGene,1000g2012apr_all,snp138,avsift,clinvar_20140211,caddgt10 \
+            -operation g,f,f,f,f,f -arg \'-splicing 4\',,,,,\'-otherinfo\' -nastring NA -build hg19 -csvout -otherinfo \
             -outfile {output_prefix} {input} {db}".format(
 	output_prefix=avinput, 
 	input=avinput, 
