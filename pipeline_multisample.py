@@ -455,11 +455,21 @@ def merge_indel_and_snp_vcf(snp,indel, output):
                 output=output
             )) 
 
-def split_variants_by_sample(vcf, sample, output):
-    run_cmd("{} -Xmx2g -jar {} -R {} \
+#
+# what if there is multiple alt alleles??? is the first one most covered  
+#
+def split_variants_by_sample(vcf, sample, output, ad_threshold=5, dp_threshold=8):
+    
+    run_cmd("{java} -Xmx2g -jar {gatk} -R {ref} \
             -T SelectVariants \
-            --variant {} -sn {} \
-            -o {}".format(java, gatk,reference,vcf,sample,output))
+            --variant {vcf} \
+            -sn {sample} \
+            -select 'vc.getGenotype(\"{sample}\").getAD().1 >= {ad_thr} && vc.getGenotype(\"{sample}\").getDP() >= {dp_thr}' \
+            -o {out} \
+            ".format(java=java, gatk=gatk, ref=reference, 
+                vcf=vcf, sample=sample, out=output, 
+                ad_thr=ad_threshold, 
+                dp_thr=dp_threshold))
 
 def split_snps(vcf,snp_file):
     """Select for snps in the vcf file"""
@@ -944,7 +954,8 @@ def split_snp_parameters_old():
 @follows('final_calls')
 @files(split_snp_parameters)
 def split_snps(input, output, sample):
-    split_variants_by_sample(input, sample, output)
+    """ Split variants by sample, and use sample-specific statistics to filter: AD and DP"""
+    split_variants_by_sample(input, sample, output, ad_threshold=5, dp_threshold=8)
 
 
 
@@ -970,6 +981,19 @@ def add_cadd_scores(input,output):
                 script=cadd_annotation_script,
                 cadd_scores=cadd_scores_db,
                 output_vcf=output))
+
+@transform(split_snps, formatter("(?P<SAMPLE_NUM>.+).exome.vcf", None, None, None),
+                                '{subpath[1]}/annotated-with-annovar/{SAMPLE_NUM[0]}.avinput')
+def prepare_annovar_inputs2(vcf, output):
+    try: os.mkdir('annotated-with-annovar')
+    except (OSError): pass # dir exists
+ 
+    run_cmd("convert2annovar.pl {vcf} -format vcf4 -withzyg -includeinfo \
+        -genoqual 3 -coverage 6 \
+        -outfile {out} \
+        ".format(vcf=vcf, 
+                 out=output))
+    
 
 @split(final_calls,'annotated-with-annovar/*.avinput') 
 def prepare_annovar_inputs(multisample_vcf, outputs):
@@ -1055,9 +1079,9 @@ def produce_variant_annotation_table(inputs, outputs):
 	
     dir = 'annotated-with-annovar/annotated-tables'
     try:
-	os.mkdir(dir)
+	       os.mkdir(dir)
     except (OSError):
-	pass # dir exists
+	       pass # dir exists
     
     avinput = outputs[0]
     rare_var_fun = inputs[0]
