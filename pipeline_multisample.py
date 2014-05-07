@@ -982,21 +982,18 @@ def add_cadd_scores(input,output):
                 cadd_scores=cadd_scores_db,
                 output_vcf=output))
 
-@transform(split_snps, formatter("(?P<SAMPLE_NUM>.+).exome.vcf", None, None, None),
-                                '{subpath[1]}/annotated-with-annovar/{SAMPLE_NUM[0]}.avinput')
-def prepare_annovar_inputs2(vcf, output):
+@transform(split_snps, formatter('.*/(?P<SAMPLE_ID>[^/]+).exome.vcf'),
+			'{subpath[0][1]}/annotated-with-annovar/{SAMPLE_ID[0]}.avinput')
+def prepare_annovar_inputs(vcf, output):
     try: os.mkdir('annotated-with-annovar')
     except (OSError): pass # dir exists
  
-    run_cmd("convert2annovar.pl {vcf} -format vcf4 -withzyg -includeinfo \
-        -genoqual 3 -coverage 6 \
-        -outfile {out} \
-        ".format(vcf=vcf, 
-                 out=output))
+    run_cmd("convert2annovar.pl {vcf} -format vcf4 -withzyg -includeinfo -outfile {out} \
+        ".format(vcf=vcf, out=output))
     
 
 @split(final_calls,'annotated-with-annovar/*.avinput') 
-def prepare_annovar_inputs(multisample_vcf, outputs):
+def prepare_annovar_inputs2(multisample_vcf, outputs):
     """ create an annovar file for every sample. needs to be run separately from the rest"""
     os.mkdir('annotated-with-annovar')
     output_prefix = 'annotated-with-annovar/sample'
@@ -1071,9 +1068,9 @@ def annotate_function_of_rare_variants(inputs, outputs):
 
 
 @transform(annotate_function_of_rare_variants, 
-           formatter("sample.(?P<SAMPLE_NUM>.+).avinput.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered.variant_function", None, None, None),
-           ['{path[0]}/annotated-tables/{SAMPLE_NUM[0]}.rare_coding_and_splicing.avinput', 
-            '{path[0]}/annotated-tables/{SAMPLE_NUM[0]}.rare_coding_and_splicing.avinput.hg19_multianno.csv'])
+           formatter(".*/(?P<SAMPLE_ID>[^/]+).avinput.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered.variant_function", None, None, None),
+           ['{path[0]}/annotated-tables/{SAMPLE_ID[0]}.rare_coding_and_splicing.avinput', 
+            '{path[0]}/annotated-tables/{SAMPLE_ID[0]}.rare_coding_and_splicing.avinput.hg19_multianno.csv'])
 def produce_variant_annotation_table(inputs, outputs):
     """ produce a table of various annotations per variant """
 	
