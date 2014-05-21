@@ -943,13 +943,6 @@ def split_snp_parameters():
     for id in get_sample_ids():
         yield [exome_vcf, id + '/' + id + '.exome.vcf', id]
 
-def split_snp_parameters_old():
-    files = glob.glob(options.bam_dir + '/*.bam')
-    exome_vcf = 'multisample.gatk.analysisReady.exome.vcf'
-    for file in files:
-        prefix = os.path.splitext(os.path.basename(file))[0]
-        yield [exome_vcf, prefix + '/' + prefix + '.exome.vcf', prefix]
-
 @posttask(cleanup_files)
 @follows('final_calls')
 @files(split_snp_parameters)
@@ -963,24 +956,11 @@ def split_snps(input, output, sample):
 # Annovar annotation / filtering
 ###########
 
-# executables
-cadd_annotation_script = os.path.join(script_path, 'annotateWithCadd.py')
 
 # reference dbs
-cadd_scores_db = os.path.join(script_path,'../reference/CADD_wg_snvs.tsv.gz')
 annovar_human_db = os.path.join(script_path,'../tools/annovar/humandb')
 annovar_1000genomes_eur = '1000g2012apr_eur'
 annovar_inhouse_db = 'common_inhouse_variants_jan2014.txt'
-
-# not used now as cadd is added by annovar
-@transform(final_calls,suffix('.analysisReady.exome.vcf'),'.analysisReady.exome.with_CADD.vcf')
-def add_cadd_scores(input,output):
-    """Include cadd scores in the info field of the vcf"""
-    run_cmd("cat {input_vcf} | {script} -p {cadd_scores} > {output_vcf}".format(
-                input_vcf=input,
-                script=cadd_annotation_script,
-                cadd_scores=cadd_scores_db,
-                output_vcf=output))
 
 @transform(split_snps, formatter('.*/(?P<SAMPLE_ID>[^/]+).exome.vcf'),
 			'{subpath[0][1]}/annotated-with-annovar/{SAMPLE_ID[0]}.avinput')
@@ -1101,12 +1081,88 @@ def produce_variant_annotation_table(inputs, outputs):
     f_out.close()
     
     # annotate all variants selected above
-    run_cmd("table_annovar.pl -protocol refGene,1000g2012apr_all,snp138,avsift,clinvar_20140211,caddgt10 \
-            -operation g,f,f,f,f,f -arg \'-splicing 4\',,,,,\'-otherinfo\' -nastring NA -build hg19 -csvout -otherinfo \
+    run_cmd("table_annovar.pl -protocol refGene,1000g2012apr_eur,1000g2012apr_amr,1000g2012apr_asn,1000g2012apr_afr,snp138,avsift,clinvar_20140211,caddgt10 \
+            -operation g,f,f,f,f,f,f,f,f -arg \'-splicing 4\',,,,,,,,\'-otherinfo\' -nastring NA -build hg19 -csvout -otherinfo \
             -outfile {output_prefix} {input} {db}".format(
 	output_prefix=avinput, 
 	input=avinput, 
 	db=annovar_human_db))
+
+
+#
+# include omim phenotypes
+
+def get_omim_gene_phenotype_map(omim_file):
+	gene_col=6
+	pht_col=12
+	map_pht={}
+	f = open(omim_file)
+	for l in f.xreadlines():
+        	lsplit=l.split('|')
+	        # ignore lines with no phenotype
+        	if lsplit[pht_col-1].strip()=='':
+                	continue
+
+	        genes, phenotype = lsplit[gene_col-1], lsplit[pht_col-1]
+        	for gene in genes.split(','):
+                	gene = gene.strip()
+	                if gene == '': continue
+                	try:
+	                        map_pht[gene] = map_pht[gene]+'|'+phenotype.strip()
+        	        except KeyError:
+	                      	map_pht[gene] = phenotype.strip()
+	f.close()
+	return map_pht
+
+omim_gene_phenotype_map = get_omim_gene_phenotype_map(os.path.join(script_path,'../tools/annovar/omim/genemap2.txt'))
+
+
+def quote_aware_split(string, delim=',', quote='"'):
+	out = []
+	s = ''
+	open_quote=False
+	for c in string:
+		if c == quote: 
+			open_quote = not open_quote
+		if c == delim and not open_quote:
+			out += [s]
+			s = ''
+		else: 
+			s += c
+	return out + [s]
+
+
+@transform(produce_variant_annotation_table, formatter(), '{path[1]}/{basename[1]}.with_omim.csv')
+def include_omim_phenotype_annotation(inputs, output_table, gene_column=7, omim_column=15, delim=','):
+	table_in = open(inputs[1],'r')
+	table_out = open(output_table,'w')
+
+	# header
+	header_in=quote_aware_split(table_in.readline(), delim)
+	if omim_column <= 0:    
+        	omim_column=len(header_in)+1
+	header_out = header_in[:omim_column-1] + ['omim_phenotype'] + header_in[omim_column-1:]
+	table_out.write(delim.join(header_out))
+
+	# the rest of the table
+	for l in table_in.xreadlines():
+        	lsplit = quote_aware_split(l,delim)
+	        gene = lsplit[gene_column-1].strip('"')
+
+		# if present, remove suffix in parenthesis
+		if gene.find('(') >= 0:
+			gene = gene[:gene.find('(')]
+
+        	try:
+	                omim_phenotype = omim_gene_phenotype_map[gene]
+        	except KeyError:
+                	omim_phenotype = 'NA'
+
+	        table_out.write(delim.join(lsplit[:omim_column-1] + ['"'+omim_phenotype+'"'] + lsplit[omim_column-1:]) )
+
+	table_in.close()
+	table_out.close()
+
 
 
 #
