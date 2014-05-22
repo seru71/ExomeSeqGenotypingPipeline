@@ -1093,27 +1093,28 @@ def produce_variant_annotation_table(inputs, outputs):
 # include omim phenotypes
 
 def get_omim_gene_phenotype_map(omim_file):
-	gene_col=6
-	pht_col=12
-	map_pht={}
-	f = open(omim_file)
-	for l in f.xreadlines():
+    gene_col=6
+    pht_col=12
+    map_pht={}
+    f = open(omim_file)
+    for l in f.xreadlines():
         lsplit=l.split('|')
-	    # ignore lines with no phenotype
+	
+	# ignore lines with no phenotype
         if lsplit[pht_col-1].strip()=='':
-           	continue
+            continue
 
-	    genes, phenotype = lsplit[gene_col-1], lsplit[pht_col-1]
+	genes, phenotype = lsplit[gene_col-1], lsplit[pht_col-1]
         for gene in genes.split(','):
-           	gene = gene.strip()
-	        if gene == '': continue
-           	try:
-	            map_pht[gene] = map_pht[gene]+'|'+phenotype.strip()
+            gene = gene.strip()
+	    if gene == '': continue
+            try:
+	        map_pht[gene] = map_pht[gene]+'|'+phenotype.strip()
             except KeyError:
-	           	map_pht[gene] = phenotype.strip()
+	        map_pht[gene] = phenotype.strip()
 	
     f.close()
-	return map_pht
+    return map_pht
 
 omim_gene_phenotype_map = get_omim_gene_phenotype_map(os.path.join(script_path,'../tools/annovar/omim/genemap2.txt'))
 
@@ -1147,17 +1148,17 @@ def include_omim_phenotype_annotation(inputs, output_table, gene_column=7, omim_
 
 	# the rest of the table
 	for l in table_in.xreadlines():
-        lsplit = quote_aware_split(l,delim)
+            lsplit = quote_aware_split(l,delim)
 	    gene = lsplit[gene_column-1].strip('"')
 
-		# if present, remove suffix in parenthesis
-		if gene.find('(') >= 0:
-			gene = gene[:gene.find('(')]
+	    # if present, remove suffix in parenthesis
+	    if gene.find('(') >= 0:
+		gene = gene[:gene.find('(')]
 
-        try:
-            omim_phenotype = omim_gene_phenotype_map[gene]
-        except KeyError:
-            omim_phenotype = 'NA'
+            try:
+                omim_phenotype = omim_gene_phenotype_map[gene]
+            except KeyError:
+                omim_phenotype = 'NA'
 
 	    table_out.write(delim.join(lsplit[:omim_column-1] + ['"'+omim_phenotype+'"'] + lsplit[omim_column-1:]) )
 
@@ -1170,7 +1171,7 @@ def extract_recessive_disorder_candidates(input, output, gene_column_name='Gene.
     table_in = open(input,'r')
     
     # get right column indexes
-    header = quote_aware_split(table_in.readline(), delim)
+    header = quote_aware_split(table_in.readline().strip(), delim)
     gene_col_index     = header.index(gene_column_name)
     zygozity_col_index = header.index(zygozity_column_name) 
     
@@ -1182,9 +1183,9 @@ def extract_recessive_disorder_candidates(input, output, gene_column_name='Gene.
         # if present, remove suffix in parenthesis
         if gene.find('(') >= 0: gene = gene[:gene.find('(')]
         
-        # put the variant record to the map
+        # put the variant record in the map
         try:
-            variant_records_per_gene[gene] = variant_records_per_gene[gene] + [l]
+            variant_records_per_gene[gene] += [l]
         except KeyError: 
             variant_records_per_gene[gene] = [l]
     
@@ -1192,16 +1193,19 @@ def extract_recessive_disorder_candidates(input, output, gene_column_name='Gene.
     
     # write the table with candidates for recessive inheritance model
     table_out = open(output,'w')
-    table_out.write(delim.join(header))
+    table_out.write(delim.join(header)+'\n')
     
-    # iterate over the genes and select these with 2 or more variants, or homozygous genotype
+    # iterate over the genes and select...
     for gene in variant_records_per_gene:
+	# ...these with 2 or more variants...
         if len(variant_records_per_gene[gene]) >= 2:
-            for l in variant_records_per_gene[gene]: table_out.write(l)
+            for l in variant_records_per_gene[gene]: 
+		table_out.write(l)
+	# or homozygous variants
         else:
-            lsplit = quote_aware_split(variant_records_per_gene[gene][1])
+            lsplit = quote_aware_split(variant_records_per_gene[gene][0])
             if lsplit[zygozity_col_index].find('"hom\t') >= 0:
-                table_out.write(l)
+                table_out.write(variant_records_per_gene[gene][0])
     
     table_out.close()
     
