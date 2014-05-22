@@ -1136,6 +1136,7 @@ def quote_aware_split(string, delim=',', quote='"'):
 
 @transform(produce_variant_annotation_table, formatter(), '{path[1]}/{basename[1]}.with_omim.csv')
 def include_omim_phenotype_annotation(inputs, output_table, gene_column=7, omim_column=15, delim=','):
+    """ include OMIM phenotype into the annotation table """
 	table_in = open(inputs[1],'r')
 	table_out = open(output_table,'w')
 
@@ -1167,7 +1168,7 @@ def include_omim_phenotype_annotation(inputs, output_table, gene_column=7, omim_
 
 @transform(include_omim_phenotype_annotation, formatter(), '{path[0]}/{basename[0]}.recessive.csv')
 def extract_recessive_disorder_candidates(input, output, gene_column_name='Gene.refGene', zygozity_column_name='Otherinfo', delim=','):
-    
+    """ extract a part of the annotated table that contains candidates for recessive disorders """ 
     table_in = open(input,'r')
     
     # get right column indexes
