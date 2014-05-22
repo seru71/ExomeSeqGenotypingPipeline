@@ -1081,8 +1081,8 @@ def produce_variant_annotation_table(inputs, outputs):
     f_out.close()
     
     # annotate all variants selected above
-    run_cmd("table_annovar.pl -protocol refGene,1000g2012apr_eur,1000g2012apr_amr,1000g2012apr_asn,1000g2012apr_afr,snp138,avsift,clinvar_20140211,caddgt10 \
-            -operation g,f,f,f,f,f,f,f,f -arg \'-splicing 4\',,,,,,,,\'-otherinfo\' -nastring NA -build hg19 -csvout -otherinfo \
+    run_cmd("table_annovar.pl -protocol refGene,1000g2012apr_eur,1000g2012apr_amr,1000g2012apr_asn,1000g2012apr_afr,snp138,avsift,clinvar_20140211,ljb23_pp2hvar,caddgt10 \
+            -operation g,f,f,f,f,f,f,f,f,f -arg \'-splicing 4\',,,,,,,,,\'-otherinfo\' -nastring NA -build hg19 -csvout -otherinfo \
             -outfile {output_prefix} {input} {db}".format(
 	output_prefix=avinput, 
 	input=avinput, 
