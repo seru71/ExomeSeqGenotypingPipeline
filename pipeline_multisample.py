@@ -1098,20 +1098,21 @@ def get_omim_gene_phenotype_map(omim_file):
 	map_pht={}
 	f = open(omim_file)
 	for l in f.xreadlines():
-        	lsplit=l.split('|')
-	        # ignore lines with no phenotype
-        	if lsplit[pht_col-1].strip()=='':
-                	continue
+        lsplit=l.split('|')
+	    # ignore lines with no phenotype
+        if lsplit[pht_col-1].strip()=='':
+           	continue
 
-	        genes, phenotype = lsplit[gene_col-1], lsplit[pht_col-1]
-        	for gene in genes.split(','):
-                	gene = gene.strip()
-	                if gene == '': continue
-                	try:
-	                        map_pht[gene] = map_pht[gene]+'|'+phenotype.strip()
-        	        except KeyError:
-	                      	map_pht[gene] = phenotype.strip()
-	f.close()
+	    genes, phenotype = lsplit[gene_col-1], lsplit[pht_col-1]
+        for gene in genes.split(','):
+           	gene = gene.strip()
+	        if gene == '': continue
+           	try:
+	            map_pht[gene] = map_pht[gene]+'|'+phenotype.strip()
+            except KeyError:
+	           	map_pht[gene] = phenotype.strip()
+	
+    f.close()
 	return map_pht
 
 omim_gene_phenotype_map = get_omim_gene_phenotype_map(os.path.join(script_path,'../tools/annovar/omim/genemap2.txt'))
@@ -1146,24 +1147,65 @@ def include_omim_phenotype_annotation(inputs, output_table, gene_column=7, omim_
 
 	# the rest of the table
 	for l in table_in.xreadlines():
-        	lsplit = quote_aware_split(l,delim)
-	        gene = lsplit[gene_column-1].strip('"')
+        lsplit = quote_aware_split(l,delim)
+	    gene = lsplit[gene_column-1].strip('"')
 
 		# if present, remove suffix in parenthesis
 		if gene.find('(') >= 0:
 			gene = gene[:gene.find('(')]
 
-        	try:
-	                omim_phenotype = omim_gene_phenotype_map[gene]
-        	except KeyError:
-                	omim_phenotype = 'NA'
+        try:
+            omim_phenotype = omim_gene_phenotype_map[gene]
+        except KeyError:
+            omim_phenotype = 'NA'
 
-	        table_out.write(delim.join(lsplit[:omim_column-1] + ['"'+omim_phenotype+'"'] + lsplit[omim_column-1:]) )
+	    table_out.write(delim.join(lsplit[:omim_column-1] + ['"'+omim_phenotype+'"'] + lsplit[omim_column-1:]) )
 
 	table_in.close()
 	table_out.close()
 
-
+@transform(include_omim_phenotype_annotation, formatter(), '{path[0]}/{basename[0]}.recessive.csv')
+def extract_recessive_disorder_candidates(input, output, gene_column_name='Gene.refGene', zygozity_column_name='Otherinfo', delim=','):
+    
+    table_in = open(input,'r')
+    
+    # get right column indexes
+    header = quote_aware_split(table_in.readline(), delim)
+    gene_col_index     = header.index(gene_column_name)
+    zygozity_col_index = header.index(zygozity_column_name) 
+    
+    variant_records_per_gene={}
+    for l in table_in.xreadlines():
+        lsplit = quote_aware_split(l,delim)
+        
+        gene = lsplit[gene_col_index].strip('"')
+        # if present, remove suffix in parenthesis
+        if gene.find('(') >= 0: gene = gene[:gene.find('(')]
+        
+        # put the variant record to the map
+        try:
+            variant_records_per_gene[gene] = variant_records_per_gene[gene] + [l]
+        except KeyError: 
+            variant_records_per_gene[gene] = [l]
+    
+    table_in.close()
+    
+    # write the table with candidates for recessive inheritance model
+    table_out = open(output,'w')
+    table_out.write(delim.join(header))
+    
+    # iterate over the genes and select these with 2 or more variants, or homozygous genotype
+    for gene in variant_records_per_gene:
+        if len(variant_records_per_gene[gene]) >= 2:
+            for l in variant_records_per_gene[gene]: table_out.write(l)
+        else:
+            lsplit = quote_aware_split(variant_records_per_gene[gene][1])
+            if lsplit[zygozity_col_index].find('"hom\t') >= 0:
+                table_out.write(l)
+    
+    table_out.close()
+    
+    
 
 #
 # QC on variant level
