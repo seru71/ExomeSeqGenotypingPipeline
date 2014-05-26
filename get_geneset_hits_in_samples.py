@@ -4,36 +4,19 @@ For a list of genes in GENE_SET_FILE and a list of files with variant calls
 (one sample per file; currently annovar avinput.refGene.variant_function files) 
 print out which genes from the gene set are found altered (per sample)
 
-author: Pawel Sztromwasser (pawel.sztromwasser@k2.uib.no  
+author: Pawel Sztromwasser (pawel.sztromwasser at k2.uib.no)  
 """
 
-def getGenes(gene_set_file):
+def get_genes(gene_set_file):
 	""" Get the set of genes in interest """ 
 	f = open(gene_set_file)
 	genes = [e.strip() for e in f.xreadlines()]
 	f.close()
 	return set(genes)
 
+from utility_functions import parenthesis_aware_split
 
-def parenthesisAwareSplit(string, delim=',', open_par='(', close_par=')'):
-	"""	Split outside of parenthesis (i.e. ignore delimiters within parenthesis."""
-	out = []
-	s = ''
-	open_parenthesis=0
-	for c in string:
-		if c == open_par: 
-			open_parenthesis+=1
-		if c == close_par and open_parenthesis > 0:
-			open_parenthesis-=1
-		if c == delim and open_parenthesis==0:
-			out += [s]
-			s = ''
-		else: 
-			s += c
-	return out + [s]
-
-
-def findGenesetHitsInSamples(sample_files, geneset, gene_column = 1, delim='\t'):
+def find_geneset_hits_in_samples(sample_files, geneset, gene_column = 1, delim='\t'):
 	"""
 	Iterate over the per-sample variant files and look for genes from the geneset.
 	Returns a dict in form {sample: [gene1,gene2]}, where gene1 and gene2 belong to the geneset.
@@ -51,8 +34,8 @@ def findGenesetHitsInSamples(sample_files, geneset, gene_column = 1, delim='\t')
 			gene_entry = gene_entry.strip().strip('"')		# clean the gene name
 			genes=[gene_entry]
 			if gene_entry.find(',') >= 0: 
-				genes = parenthesisAwareSplit(gene_entry,delim=',')	# split multi gene entries
-			genes = [parenthesisAwareSplit(gene,delim=';') for gene in genes]
+				genes = parenthesis_aware_split(gene_entry,delim=',')	# split multi gene entries
+			genes = [parenthesis_aware_split(gene,delim=';') for gene in genes]
 			genes = set([gene for sublist in genes for gene in sublist])  # get unique gene ids only
 			
 			for gene in genes:
@@ -82,9 +65,9 @@ if __name__ == '__main__':
 		sys.exit(0)
 	
 	variant_files = glob.glob(sys.argv[1])
-	geneset = getGenes(sys.argv[2])
+	geneset = get_genes(sys.argv[2])
 	
-	map = findGenesetHitsInSamples(variant_files, geneset, gene_column=1)
+	map = find_geneset_hits_in_samples(variant_files, geneset, gene_column=1)
 
 #	print '---------------'	
 	for sample in sorted(map.keys()):
