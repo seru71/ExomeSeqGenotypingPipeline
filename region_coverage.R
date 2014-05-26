@@ -2,13 +2,13 @@
 # Rscript for coverage statistics and number of features in a region of a bam file
 # Rscript coverage.R '/export/astrakanfs/mpesj/Agilent/1040PRN0046_GRCh37.gatk.bam' 7 36399490 55889334 8
 
-VERSION <- '1.3-Feb2014'
+VERSION <- '1.3-May2014'
 
 FEATURES <- '/export/astrakanfs/stefanj/reference/ccdsGene.hg19.mar2014.sqlite'
 #FEATURES <- '/home/pawels/Work/mgm-projects/test-data/ccdsGene.hg19.mar2014.sqlite'
 
 .libPaths('/export/astrakanfs/stefanj/R/library')
-suppressMessages(require(multicore,quiet=TRUE))
+#suppressMessages(require(multicore,quiet=TRUE))
 suppressMessages(require(GenomicFeatures,quiet=TRUE))
 suppressMessages(require(SynergizeR,quiet=TRUE))
 
@@ -54,18 +54,18 @@ number.exons <- length(hg19.exons)
 
 #intersect the transcript range with the actual reads reported, to calculate coverage
 chrNr=paste('chr',chr,sep='')
-coverage.transcripts <- Views(coverage(bamRegion)[chrNr],as(hg19.transcripts,"RangesList")[chrNr])
-coverage.exons <- Views(coverage(bamRegion)[chrNr],as(hg19.exons,"RangesList")[chrNr])
+coverage.transcripts <- Views(coverage(bamRegion, width=end)[chrNr],as(hg19.transcripts,"RangesList")[chrNr])
+coverage.exons <- Views(coverage(bamRegion, width=end)[chrNr],as(hg19.exons,"RangesList")[chrNr])
 
 #The mean is the weighted mean
 coverage.exon.means <- viewMeans(coverage.exons)[[1]]%*%width(coverage.exons)[[1]]/sum(width(coverage.exons)[[1]])
 
 # add coverage information to the GRanges object as metadata
-elementMetadata(hg19.transcripts)$mean_coverage <- as.vector(viewMeans(coverage.transcripts))
-elementMetadata(hg19.exons)$mean_coverage <- as.vector(viewMeans(coverage.exons))
+elementMetadata(hg19.transcripts)['mean_coverage'] <- as.vector(viewMeans(coverage.transcripts))
+elementMetadata(hg19.exons)['mean_coverage'] <- as.vector(viewMeans(coverage.exons))
 
-transcripts.less_than_minimum.covered <- length(which(unlist(elementMetadata(hg19.transcripts)$mean_coverage[1],use.names=F) < minCoverage))
-exons.low_cvrg <- hg19.exons[unlist(elementMetadata(hg19.exons)$mean_coverage[1],use.names=F) < minCoverage]
+transcripts.less_than_minimum.covered <- length(which(elementMetadata(hg19.transcripts)$mean_coverage < minCoverage))
+exons.low_cvrg <- hg19.exons[elementMetadata(hg19.exons)$mean_coverage < minCoverage]
 exons.low_cvrg.number <- length(exons.low_cvrg)
 
 transcripts.less_than_minimum_covered.percent = round(transcripts.less_than_minimum.covered/number.transcripts*100)
@@ -81,7 +81,9 @@ ids <- sub("\\..*",'',as.vector(elementMetadata(hg19.transcripts)[, "tx_name"]))
 if (length(ids) == 1){
 	ids<-append("",ids)
 }
-transcripts_to_genes <- data.frame(transcript=elementMetadata(hg19.transcripts)[, "tx_name"], hgnc=synergizer(authority="ensembl", species="Homo sapiens", domain="ccds", range="hgnc_symbol", ids=ids)[,2])
+transcripts_to_genes <- data.frame(transcript=elementMetadata(hg19.transcripts)[, "tx_name"], 
+                                   hgnc=synergizer(authority="ensembl", species="Homo sapiens", 
+                                   domain="ccds", range="hgnc_symbol", ids=ids)[,2])
 number.genes<-length(unique(transcripts_to_genes$hgnc))
 
 cat('Script version', VERSION,'\n')
@@ -106,7 +108,7 @@ if (exons.low_cvrg.number > 0) {
     results <- as.data.frame(exons.low_cvrg)
     for(i in 1:exons.low_cvrg.number) {
         #meanCoverage <- formatC(unlist(elementMetadata(exons.low_cvrg[i])[1,"mean_coverage"],use.names=F),digits=2)
-        meanCoverage=unlist(exons.low_cvrg$mean_coverage[1],use.names=F)[i]
+        meanCoverage=exons.low_cvrg$mean_coverage[i]
         transcripts <- exons_to_transcripts[which(exons_to_transcripts[,1] == i),2]
         genes <- c()
         for (transcript in exons_to_transcripts[which(exons_to_transcripts[,1] == i),2]) {
