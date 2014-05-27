@@ -14,7 +14,7 @@ def get_genes(gene_set_file):
 	f.close()
 	return set(genes)
 
-from utility_functions import parenthesis_aware_split
+from utility_functions import quote_aware_split, parenthesis_aware_split
 
 def find_geneset_hits_in_samples(sample_files, geneset, gene_column_name = 'Gene.refGene'):
 	"""
@@ -30,7 +30,7 @@ def find_geneset_hits_in_samples(sample_files, geneset, gene_column_name = 'Gene
 		sys.stderr.write('Processing '+ fname + '...')
 		f = open(fname)
 		
-		header = quote_aware_split(table_in.readline().strip())
+		header = quote_aware_split(f.readline().strip())
 		gene_col_index = header.index(gene_column_name)
 		
 		for l in f.xreadlines():
@@ -73,14 +73,15 @@ if __name__ == '__main__':
 	variant_files = glob.glob(sys.argv[1])
 	geneset = get_genes(sys.argv[2])
 	
-	map = find_geneset_hits_in_samples(variant_files, geneset, gene_column=1)
+	map = find_geneset_hits_in_samples(variant_files, geneset)
 
 #	print '---------------'	
 	for sample in sorted(map.keys()):
 		print sample
 		for gene in sorted(map[sample].keys()):
+			print gene, ':'
 			print ''.join(map[sample][gene])
-		print '------------------'
+		print '------------------\n'
 		
 	
 	
