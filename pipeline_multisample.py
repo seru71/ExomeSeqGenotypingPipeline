@@ -60,18 +60,23 @@ if __name__ == '__main__':
                         type="string",
                         help="Directory containing all the bams for analysis.")
                         
-    parser.add_option("-cr","--capture_regions", dest="capture_regions",
+#    parser.add_option("-r","--reference",dest="reference",
+#                      metavar="FILE", type="string",
+#                      default="../reference/human_g1k_v37.clean.fasta",
+#                      help="Fasta file with the reference genome")                 
+                     
+    parser.add_option("--cr","--capture_regions", dest="capture_regions",
                       metavar="FILE", 
-                      type="string", 
+                      type="string",
+                      default="../reference/Nimblegen_SeqCap_EZ_Exome_v2_37_targetRegOnly_g1k.bed", 
                       help="Bed file with capture regions (used for depth calculations)")                    
 
-    parser.add_option("-er","--exome_regions", dest="exome_regions",
+    parser.add_option("--er","--exome_regions", dest="exome_regions",
                       metavar="FILE", 
                       type="string", 
+                      default="../reference/Nimblegen_SeqCap_EZ_Exome_v2_37_targetRegOnly_wingspan_g1k.bed",
                       help="Bed file with exome regions (used for filtering; can be wider than capture regions)")                    
-                     
-                     
-                        
+                            
     parser.add_option("-g", "--groups", dest="groups",
                         type="int",
                         default=1,
@@ -150,7 +155,7 @@ if __name__ == '__main__':
     #       strings corresponding to the "dest" parameter
     #       in the options defined above
     #
-    mandatory_options = ['bam_dir','capture_regions']
+    mandatory_options = ['bam_dir']
 
     #vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
     #                                             #
@@ -861,7 +866,7 @@ def metric_coverage_multisample(bams, output):
                 capture=options.capture_regions)
 
     for bam in bams:
-    cmd += " -I {}".format(bam)
+        cmd += " -I {}".format(bam)
 
     run_cmd(cmd)
 
