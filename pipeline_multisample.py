@@ -1128,49 +1128,45 @@ def get_omim_gene_phenotype_map(omim_file):
 omim_gene_phenotype_map = get_omim_gene_phenotype_map(os.path.join(script_path,'../tools/annovar/omim/genemap2.txt'))
 
 
-def quote_aware_split(string, delim=',', quote='"'):
-	out = []
-	s = ''
-	open_quote=False
-	for c in string:
-		if c == quote: 
-			open_quote = not open_quote
-		if c == delim and not open_quote:
-			out += [s]
-			s = ''
-		else: 
-			s += c
-	return out + [s]
-
+from utility_functions import quote_aware_split, parenthesis_aware_split
 
 @transform(produce_variant_annotation_table, formatter(), '{path[1]}/{basename[1]}.with_omim.csv')
 def include_omim_phenotype_annotation(inputs, output_table, gene_column=7, omim_column=15, delim=','):
-    """ include OMIM phenotype into the annotation table """
+	""" include OMIM phenotype into the annotation table """
 	table_in = open(inputs[1],'r')
 	table_out = open(output_table,'w')
 
 	# header
 	header_in=quote_aware_split(table_in.readline(), delim)
-	if omim_column <= 0:    
-        	omim_column=len(header_in)+1
+	if omim_column <= 0:	
+			omim_column=len(header_in)+1
 	header_out = header_in[:omim_column-1] + ['omim_phenotype'] + header_in[omim_column-1:]
 	table_out.write(delim.join(header_out))
 
 	# the rest of the table
 	for l in table_in.xreadlines():
-            lsplit = quote_aware_split(l,delim)
-	    gene = lsplit[gene_column-1].strip('"')
+		lsplit = quote_aware_split(l,delim)
+		gene = lsplit[gene_column-1].strip('"')
 
-	    # if present, remove suffix in parenthesis
-	    if gene.find('(') >= 0:
-		gene = gene[:gene.find('(')]
-
+        # the gene record can be a list (e.g. overlapping genes), so it needs to be split
+        genes = [gene]
+        if gene.find(',')>=0:
+            genes = parenthesis_aware_split(gene, delim=',')
+        genes = [parenthesis_aware_split(gene,delim=';') for gene in genes]
+        genes = set([gene for sublist in genes for gene in sublist])  # unlist and get unique gene ids only
+        
+        for gene in genes:
+            # if present, remove suffix in parenthesis
+            if gene.find('(') >= 0: 
+                gene = gene[:gene.find('(')]
+            
+            # put the variant record in the map
             try:
-                omim_phenotype = omim_gene_phenotype_map[gene]
+			    omim_phenotype = omim_gene_phenotype_map[gene]
             except KeyError:
-                omim_phenotype = 'NA'
+			     omim_phenotype = 'NA'
 
-	    table_out.write(delim.join(lsplit[:omim_column-1] + ['"'+omim_phenotype+'"'] + lsplit[omim_column-1:]) )
+        table_out.write(delim.join(lsplit[:omim_column-1] + ['"'+omim_phenotype+'"'] + lsplit[omim_column-1:]) )
 
 	table_in.close()
 	table_out.close()
@@ -1190,14 +1186,22 @@ def extract_recessive_disorder_candidates(input, output, gene_column_name='Gene.
         lsplit = quote_aware_split(l,delim)
         
         gene = lsplit[gene_col_index].strip('"')
-        # if present, remove suffix in parenthesis
-        if gene.find('(') >= 0: gene = gene[:gene.find('(')]
         
-        # put the variant record in the map
-        try:
-            variant_records_per_gene[gene] += [l]
-        except KeyError: 
-            variant_records_per_gene[gene] = [l]
+        # the gene record can be a list (e.g. overlapping genes), so it needs to be split
+        genes = [gene]
+        if gene.find(',')>=0:
+            genes = parenthesis_aware_split(gene, delim=',')
+        genes = [parenthesis_aware_split(gene,delim=';') for gene in genes]
+        genes = set([gene for sublist in genes for gene in sublist])  # unlist and get unique gene ids only
+        
+        for gene in genes:
+            # if present, remove suffix in parenthesis
+            if gene.find('(') >= 0: gene = gene[:gene.find('(')]
+            # put the variant record in the map
+            try:
+                variant_records_per_gene[gene] += [l]
+            except KeyError: 
+                variant_records_per_gene[gene] = [l]
     
     table_in.close()
     
