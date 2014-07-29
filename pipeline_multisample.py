@@ -33,11 +33,11 @@ gatk = os.path.join(script_path,'../src/GenomeAnalysisTK/GenomeAnalysisTK.jar')
 #reference files
 reference = os.path.join(script_path,'../reference/human_g1k_v37.clean.fasta')
 dbsnp = os.path.join(script_path,'../reference/dbsnp_137.b37.vcf')
-exome = os.path.join(script_path,'../reference/Nimblegen_SeqCap_EZ_Exome_v2_37_targetRegOnly_wingspan_g1k.bed')
-capture = os.path.join(script_path,'../reference/Nimblegen_SeqCap_EZ_Exome_v2_37_targetRegOnly_g1k.bed')
 hapmap = os.path.join(script_path,'../reference/hapmap_3.3.b37.sites.vcf')
 omni = os.path.join(script_path,'../reference/1000G_omni2.5.b37.sites.vcf')
 mills = os.path.join(script_path,'../reference/Mills_and_1000G_gold_standard.indels.b37.vcf')
+#capture = os.path.join(script_path,'../reference/Nimblegen_SeqCap_EZ_Exome_v2_37_targetRegOnly_g1k.bed')
+#exome = os.path.join(script_path,'../reference/Nimblegen_SeqCap_EZ_Exome_v2_37_targetRegOnly_wingspan_g1k.bed')
 
 n_cpus = 2
 
@@ -54,11 +54,23 @@ if __name__ == '__main__':
     from optparse import OptionParser
     import StringIO
 
-    parser = OptionParser(version="%prog 1.0", usage = "\n\n    %prog --bamdir BAM_DIR --groups NUMBER [more_options]")
+    parser = OptionParser(version="%prog 1.0", usage = "\n\n    %prog --bamdir BAM_DIR --target_regions EXOME.BED --groups NUMBER [more_options]")
     parser.add_option("-b", "--bamdir", dest="bam_dir",
                         metavar="FILE",
                         type="string",
                         help="Directory containing all the bams for analysis.")
+                        
+    parser.add_option("-cr","--capture_regions", dest="capture_regions",
+                      metavar="FILE", 
+                      type="string", 
+                      help="Bed file with capture regions (used for depth calculations)")                    
+
+    parser.add_option("-er","--exome_regions", dest="exome_regions",
+                      metavar="FILE", 
+                      type="string", 
+                      help="Bed file with exome regions (used for filtering; can be wider than capture regions)")                    
+                     
+                     
                         
     parser.add_option("-g", "--groups", dest="groups",
                         type="int",
@@ -138,7 +150,7 @@ if __name__ == '__main__':
     #       strings corresponding to the "dest" parameter
     #       in the options defined above
     #
-    mandatory_options = ['bam_dir']
+    mandatory_options = ['bam_dir','capture_regions']
 
     #vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
     #                                             #
@@ -149,7 +161,7 @@ if __name__ == '__main__':
 
     def check_mandatory_options (options, mandatory_options, helpstr):
         """
-        Check if specified mandatory options have b een defined
+        Check if specified mandatory options have been defined
         """
         missing_options = []
         for o in mandatory_options:
@@ -180,10 +192,12 @@ import resource
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 
-#   Functions
+#   Functions and variables
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
+
+
 def setlimits():
     """Set maximum meomory to be used by a child process"""
     resource.setrlimit(resource.RLIMIT_AS, (100000000000,100000000000))
@@ -340,45 +354,13 @@ def bam_alignment_metrics(bam,metrics):
                  output=metrics,
                  bam=bam
              ))
-             
-def bam_coverage_statistics(bam, statistics):
-    run_cmd("{java} -Xmx4g -jar {gatk} \
-            -R {reference} \
-            -T DepthOfCoverage \
-            -o {output} \
-            -I {input} \
-            -L {capture} \
-            -ct 8 -ct 20 -ct 30 \
-            --omitDepthOutputAtEachBase --omitLocusTable \
-            ".format(java=java, gatk=gatk,
-                reference=reference,
-                output=statistics,
-                input=bam,
-                capture=capture
-            ))
-
-# long running, memory demanding and not very useful
-def bam_coverage_multisample_statistics(bams, output):
-    cmd = "{java} -Xmx32g -jar {gatk} \
-            -R {reference} \
-            -T DepthOfCoverage \
-            -o {output} \
-            -L {capture} \
-            -ct 8 -ct 20 -ct 30 \
-            --omitDepthOutputAtEachBase --omitLocusTable \
-	    ".format(java=java, gatk=gatk,
-                reference=reference,
-                output=output,
-                capture=capture)
-
-    for bam in bams:
-	cmd += " -I {}".format(bam)
-
-    run_cmd(cmd)
-
 
 def filter_by_exome_region(vcf, output):
     """Apply filters to the vcf file to limit calling to exome region"""
+    
+    exome = options.exome_regions 
+    if exome==None or exome=="": exome = options.capture_regions 
+    
     run_cmd("vcftools --vcf %s \
              --out %s \
              --recode \
@@ -742,9 +724,6 @@ if __name__ == '__main__':
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 
 #       Put pipeline code here
-# bam_file = os.path.abspath(options.bam_file)
-# prefix to use during the runs will be the basename of the file minus extension
-# prefix = os.path.splitext(os.path.basename(bam_file))[0]
 
 def get_sample_ids():
     files = glob.glob(options.bam_dir + '/*.bam')
@@ -850,11 +829,41 @@ def metric_alignment(input,output):
 #@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.coverage.sample_summary', r'\1.coverage')
 def metric_coverage(input, output, output_format):
-    bam_coverage_statistics(input,output_format)
+       run_cmd("{java} -Xmx4g -jar {gatk} \
+            -R {reference} \
+            -T DepthOfCoverage \
+            -o {output} \
+            -I {input} \
+            -L {capture} \
+            -ct 8 -ct 20 -ct 30 \
+            --omitDepthOutputAtEachBase --omitLocusTable \
+            ".format(java=java, gatk=gatk,
+                reference=reference,
+                output=output_format,
+                input=input,
+                capture=options.capture_regions
+            ))
 
+# long running, memory demanding and not very useful
 @merge(recalibrate_baseq2, 'multisample.coverage')
 def metric_coverage_multisample(bams, output):
     bam_coverage_multisample_statistics(bams, output)
+    cmd = "{java} -Xmx32g -jar {gatk} \
+            -R {reference} \
+            -T DepthOfCoverage \
+            -o {output} \
+            -L {capture} \
+            -ct 8 -ct 20 -ct 30 \
+            --omitDepthOutputAtEachBase --omitLocusTable \
+        ".format(java=java, gatk=gatk,
+                reference=reference,
+                output=output,
+                capture=options.capture_regions)
+
+    for bam in bams:
+    cmd += " -I {}".format(bam)
+
+    run_cmd(cmd)
 
 
 #
