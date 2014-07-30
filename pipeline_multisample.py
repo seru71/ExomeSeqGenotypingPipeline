@@ -2,8 +2,8 @@
 """
 
     pipeline_multisample.py
-			[--bamdir PATH]
-			[--groups INT]
+                        [--bamdir PATH]
+                        [--groups INT]
                         [--log_file PATH]
                         [--verbose]
                         [--target_tasks]
@@ -197,7 +197,7 @@ import resource
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 
-#   Functions and variables
+#   Functions 
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
@@ -977,7 +977,7 @@ annovar_1000genomes_eur = '1000g2012apr_eur'
 annovar_inhouse_db = 'common_inhouse_variants_jan2014.txt'
 
 @transform(split_snps, formatter('.*/(?P<SAMPLE_ID>[^/]+).exome.vcf'),
-			'{subpath[0][1]}/annotated-with-annovar/{SAMPLE_ID[0]}.avinput')
+                        '{subpath[0][1]}/annotated-with-annovar/{SAMPLE_ID[0]}.avinput')
 def prepare_annovar_inputs(vcf, output):
     try: os.mkdir('annotated-with-annovar')
     except (OSError): pass # dir exists
@@ -1017,8 +1017,8 @@ def annotate_function_of_raw_variants(input, outputs):
 
 
 @transform(prepare_annovar_inputs, suffix('.avinput'), 
-					['.avinput.common_inhouse_filtered', 
-					 '.avinput.common_inhouse_dropped'])
+                                        ['.avinput.common_inhouse_filtered', 
+                                         '.avinput.common_inhouse_dropped'])
 def filter_common_inhouse(input, outputs):
     """ filter variants found in the inhouse database. OBS! output specifies the filename after rename """    
     run_cmd("annotate_variation.pl -build hg19 -filter -dbtype generic -genericdbfile {inhouse} \
@@ -1029,12 +1029,12 @@ def filter_common_inhouse(input, outputs):
         annodb=annovar_human_db))
 
     for output_file in outputs: 
-	       rename(output_file.replace('common_inhouse','hg19_generic'), output_file)
+               rename(output_file.replace('common_inhouse','hg19_generic'), output_file)
 
     
 @transform(filter_common_inhouse, suffix('.common_inhouse_filtered'),
-					['.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered',
-					 '.common_inhouse_filtered.hg19_EUR.sites.2012_04_dropped'])
+                                        ['.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered',
+                                         '.common_inhouse_filtered.hg19_EUR.sites.2012_04_dropped'])
 def filter_common_1000genomes(inputs, outputs):
     """ filter common 1000 genomes variants """
     filtered = inputs[0]                      # take only the filtered file, leave dropped
@@ -1048,13 +1048,13 @@ def filter_common_1000genomes(inputs, outputs):
 
 
 @transform(filter_common_1000genomes, suffix('.hg19_EUR.sites.2012_04_filtered'), 
-	   				['.hg19_EUR.sites.2012_04_filtered.variant_function',
-					 '.hg19_EUR.sites.2012_04_filtered.exonic_variant_function',
-					 '.hg19_EUR.sites.2012_04_filtered.variant_function.stats',
-					 '.hg19_EUR.sites.2012_04_filtered.exonic_variant_function.stats'])
+                                           ['.hg19_EUR.sites.2012_04_filtered.variant_function',
+                                         '.hg19_EUR.sites.2012_04_filtered.exonic_variant_function',
+                                         '.hg19_EUR.sites.2012_04_filtered.variant_function.stats',
+                                         '.hg19_EUR.sites.2012_04_filtered.exonic_variant_function.stats'])
 def annotate_function_of_rare_variants(inputs, outputs):
     """ annotate functional change in rare variants """
-    filtered = inputs[0] 			# use only the filtered input file, leave dropped
+    filtered = inputs[0]                         # use only the filtered input file, leave dropped
     annotate_variants_with_functional_change(input_file=filtered, output_prefix=filtered)
     # calculate stats on files created by annovar
     run_cmd("cut -f 1 {f} | sort | uniq -c > {f}.stats".format(f=outputs[0]))
@@ -1067,12 +1067,12 @@ def annotate_function_of_rare_variants(inputs, outputs):
             '{path[0]}/annotated-tables/{SAMPLE_ID[0]}.rare_coding_and_splicing.avinput.hg19_multianno.csv'])
 def produce_variant_annotation_table(inputs, outputs):
     """ produce a table of various annotations per variant """
-	
+        
     dir = 'annotated-with-annovar/annotated-tables'
     try:
-	       os.mkdir(dir)
+               os.mkdir(dir)
     except (OSError):
-	       pass # dir exists
+               pass # dir exists
     
     avinput = outputs[0]
     rare_var_fun = inputs[0]
@@ -1082,13 +1082,13 @@ def produce_variant_annotation_table(inputs, outputs):
     f_out = open(avinput,'w')
     f = open(rare_ex_var_fun)
     for l in f.xreadlines():
-	lsplit=l.split('\t')
+        lsplit=l.split('\t')
         if lsplit[1] != 'synonymous SNV':
             f_out.write(string.join(lsplit[3:],'\t'))
     f.close()
     f = open(rare_var_fun)
     for l in f.xreadlines():
-	lsplit=l.split('\t')
+        lsplit=l.split('\t')
         if lsplit[0] == 'splicing':
             f_out.write(string.join(lsplit[2:],'\t'))
     f.close()
@@ -1098,9 +1098,9 @@ def produce_variant_annotation_table(inputs, outputs):
     run_cmd("table_annovar.pl -protocol refGene,1000g2012apr_eur,1000g2012apr_amr,1000g2012apr_asn,1000g2012apr_afr,snp138,avsift,clinvar_20140211,ljb23_pp2hvar,caddgt10 \
             -operation g,f,f,f,f,f,f,f,f,f -arg \'-splicing 4\',,,,,,,,,\'-otherinfo\' -nastring NA -build hg19 -csvout -otherinfo \
             -outfile {output_prefix} {input} {db}".format(
-	output_prefix=avinput, 
-	input=avinput, 
-	db=annovar_human_db))
+        output_prefix=avinput, 
+        input=avinput, 
+        db=annovar_human_db))
 
 
 #
@@ -1113,20 +1113,20 @@ def get_omim_gene_phenotype_map(omim_file):
     f = open(omim_file)
     for l in f.xreadlines():
         lsplit=l.split('|')
-	
-	# ignore lines with no phenotype
+        
+        # ignore lines with no phenotype
         if lsplit[pht_col-1].strip()=='':
             continue
 
-	genes, phenotype = lsplit[gene_col-1], lsplit[pht_col-1]
+        genes, phenotype = lsplit[gene_col-1], lsplit[pht_col-1]
         for gene in genes.split(','):
             gene = gene.strip()
-	    if gene == '': continue
+            if gene == '': continue
             try:
-	        map_pht[gene] = map_pht[gene]+'|'+phenotype.strip()
+                map_pht[gene] = map_pht[gene]+'|'+phenotype.strip()
             except KeyError:
-	        map_pht[gene] = phenotype.strip()
-	
+                map_pht[gene] = phenotype.strip()
+        
     f.close()
     return map_pht
 
@@ -1137,21 +1137,21 @@ from utility_functions import quote_aware_split, parenthesis_aware_split
 
 @transform(produce_variant_annotation_table, formatter(), '{path[1]}/{basename[1]}.with_omim.csv')
 def include_omim_phenotype_annotation(inputs, output_table, gene_column=7, omim_column=15, delim=','):
-	""" include OMIM phenotype into the annotation table """
-	table_in = open(inputs[1],'r')
-	table_out = open(output_table,'w')
+        """ include OMIM phenotype into the annotation table """
+        table_in = open(inputs[1],'r')
+        table_out = open(output_table,'w')
 
-	# header
-	header_in=quote_aware_split(table_in.readline(), delim)
-	if omim_column <= 0:	
-			omim_column=len(header_in)+1
-	header_out = header_in[:omim_column-1] + ['omim_phenotype'] + header_in[omim_column-1:]
-	table_out.write(delim.join(header_out))
+        # header
+        header_in=quote_aware_split(table_in.readline(), delim)
+        if omim_column <= 0:        
+                        omim_column=len(header_in)+1
+        header_out = header_in[:omim_column-1] + ['omim_phenotype'] + header_in[omim_column-1:]
+        table_out.write(delim.join(header_out))
 
-	# the rest of the table
-	for l in table_in.xreadlines():
-		lsplit = quote_aware_split(l,delim)
-		gene = lsplit[gene_column-1].strip('"')
+        # the rest of the table
+        for l in table_in.xreadlines():
+                lsplit = quote_aware_split(l,delim)
+                gene = lsplit[gene_column-1].strip('"')
 
         # the gene record can be a list (e.g. overlapping genes), so it needs to be split
         genes = [gene]
@@ -1167,14 +1167,14 @@ def include_omim_phenotype_annotation(inputs, output_table, gene_column=7, omim_
             
             # put the variant record in the map
             try:
-			    omim_phenotype = omim_gene_phenotype_map[gene]
+                            omim_phenotype = omim_gene_phenotype_map[gene]
             except KeyError:
-			     omim_phenotype = 'NA'
+                             omim_phenotype = 'NA'
 
         table_out.write(delim.join(lsplit[:omim_column-1] + ['"'+omim_phenotype+'"'] + lsplit[omim_column-1:]) )
 
-	table_in.close()
-	table_out.close()
+        table_in.close()
+        table_out.close()
 
 @transform(include_omim_phenotype_annotation, formatter(), '{path[0]}/{basename[0]}.recessive.csv')
 def extract_recessive_disorder_candidates(input, output, gene_column_name='Gene.refGene', zygozity_column_name='Otherinfo', delim=','):
@@ -1216,11 +1216,11 @@ def extract_recessive_disorder_candidates(input, output, gene_column_name='Gene.
     
     # iterate over the genes and select...
     for gene in variant_records_per_gene:
-	# ...these with 2 or more variants...
+        # ...these with 2 or more variants...
         if len(variant_records_per_gene[gene]) >= 2:
             for l in variant_records_per_gene[gene]: 
-		table_out.write(l)
-	# or homozygous variants
+                table_out.write(l)
+        # or homozygous variants
         else:
             lsplit = quote_aware_split(variant_records_per_gene[gene][0])
             if lsplit[zygozity_col_index].find('"hom\t') >= 0:
@@ -1241,50 +1241,50 @@ def count_hetz_and_homz_per_chr(infiles, table_files):
     # the variant calls are expected to appear sorted by chromosome name in the following order
     # any other order should trigger an exception
     chromosomes = ['1','2','3','4','5','6','7','8','9',
-		   '10','11','12','13','14','15','16','17','18','19',
-		   '20','21','22','X','Y','GL000209.1']
+                   '10','11','12','13','14','15','16','17','18','19',
+                   '20','21','22','X','Y','GL000209.1']
 
     hetz = open(table_files[0], 'w')
     homz = open(table_files[1], 'w')
     hetz.write('sample\t'+string.join(chromosomes,'\t')+'\n')
     homz.write('sample\t'+string.join(chromosomes,'\t')+'\n')
     for fname in infiles:
-	sample_id=os.path.basename(fname).split('.')[1]
-	hetz.write(sample_id)
-	homz.write(sample_id)
+        sample_id=os.path.basename(fname).split('.')[1]
+        hetz.write(sample_id)
+        homz.write(sample_id)
 
-	het_cnt=0
-	hom_cnt=0
-	curr_chr=0
-	f = open(fname)
-	for l in f.xreadlines():
-	    lsplit=l.split('\t')
-	    while lsplit[0] != chromosomes[curr_chr] and curr_chr+1<len(chromosomes):
-		hetz.write("\t" + str(het_cnt))
-		homz.write("\t" + str(hom_cnt))
-		het_cnt=0
-		hom_cnt=0
-		curr_chr+=1
-	    # if the call is in a chromosome that is not in the list (or calls could be out of order)
-	    if lsplit[0] != chromosomes[curr_chr] and curr_chr+1 >= len(chromosomes):
-		raise Exception("Unrecognized or out-of-order chromosome: "+lsplit[0])
-	    
-	    if lsplit[5] == 'het': het_cnt+=1
+        het_cnt=0
+        hom_cnt=0
+        curr_chr=0
+        f = open(fname)
+        for l in f.xreadlines():
+            lsplit=l.split('\t')
+            while lsplit[0] != chromosomes[curr_chr] and curr_chr+1<len(chromosomes):
+                hetz.write("\t" + str(het_cnt))
+                homz.write("\t" + str(hom_cnt))
+                het_cnt=0
+                hom_cnt=0
+                curr_chr+=1
+            # if the call is in a chromosome that is not in the list (or calls could be out of order)
+            if lsplit[0] != chromosomes[curr_chr] and curr_chr+1 >= len(chromosomes):
+                raise Exception("Unrecognized or out-of-order chromosome: "+lsplit[0])
+            
+            if lsplit[5] == 'het': het_cnt+=1
             elif lsplit[5] == 'hom': hom_cnt+=1
             else:
                 raise Exception("Variant is not a het nor a hom")
 
-	f.close()
+        f.close()
 
-	# flush out the counts for the last/remaining chromosomes
+        # flush out the counts for the last/remaining chromosomes
         while curr_chr<len(chromosomes):
-	    hetz.write("\t" + str(het_cnt))
+            hetz.write("\t" + str(het_cnt))
             homz.write("\t" + str(hom_cnt))
             het_cnt=0
-            hom_cnt=0 	    
-	    curr_chr+=1
-	hetz.write('\n')
-	homz.write('\n') 
+            hom_cnt=0             
+            curr_chr+=1
+        hetz.write('\n')
+        homz.write('\n') 
 
     hetz.close()
     homz.close()
@@ -1302,7 +1302,7 @@ def produce_variant_stats_table(infiles, table_file):
     for i in range(0,sample_no):
         out.write(os.path.basename(raw_variant_files[i][0]).split('.')[1])
         for fname in [raw_variant_files[i][0], rare_variant_files[i][2]]: # exonic variant stats of raw variants and rare variants
-            f=open(fname)	
+            f=open(fname)        
             for l in f.xreadlines():
                 if l.find("exonic")>0:
                     out.write('\t'+l.split()[0])
@@ -1334,9 +1334,9 @@ def variant_qc():
 if __name__ == '__main__':
     if options.just_print:
         pipeline_printout(sys.stdout, options.target_tasks, options.forced_tasks,
-			    gnu_make_maximal_rebuild_mode = options.rebuild_mode,
+                            gnu_make_maximal_rebuild_mode = options.rebuild_mode,
                             verbose=options.verbose,
-			    checksum_level = 0)
+                            checksum_level = 0)
 
     elif options.flowchart:
         pipeline_printout_graph (   open(options.flowchart, "w"),
@@ -1345,7 +1345,7 @@ if __name__ == '__main__':
                                     os.path.splitext(options.flowchart)[1][1:],
                                     options.target_tasks,
                                     options.forced_tasks,
-                            	    gnu_make_maximal_rebuild_mode = options.rebuild_mode,
+                                        gnu_make_maximal_rebuild_mode = options.rebuild_mode,
                                     no_key_legend   = not options.key_legend_in_graph)
     else:
         pipeline_run(options.target_tasks, options.forced_tasks,
@@ -1353,5 +1353,5 @@ if __name__ == '__main__':
                             logger          = stderr_logger,
                             verbose         = options.verbose,
                             gnu_make_maximal_rebuild_mode = options.rebuild_mode,
-			    checksum_level  = 0)
+                            checksum_level  = 0)
 
