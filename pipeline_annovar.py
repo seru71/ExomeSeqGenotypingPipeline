@@ -239,6 +239,30 @@ if __name__ == '__main__':
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 
+#   Functions
+
+
+#88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
+
+
+def setlimits():
+    """Set maximum meomory to be used by a child process"""
+    resource.setrlimit(resource.RLIMIT_AS, (100000000000,100000000000))
+
+def run_cmd(cmd_str):
+    """
+    Throw exception if run command fails
+    """
+    process = subprocess.Popen(cmd_str, stdout = subprocess.PIPE,
+                                stderr = subprocess.PIPE, shell = True, preexec_fn=setlimits)
+    stdout_str, stderr_str = process.communicate()
+    if process.returncode != 0:
+        raise Exception("Failed to run '%s'\n%s%sNon-zero exit status %s" %
+                            (cmd_str, stdout_str, stderr_str, process.returncode))
+
+
+#88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
+
 #   Pipeline
 
 
@@ -250,7 +274,7 @@ if __name__ == '__main__':
 def generate_parameters():
     bams = glob.glob(options.bam_dir + '/*.bam')
     for f in bams:
-        prefix = os.path.splitext(os.path.basename(file))[0]
+        prefix = os.path.splitext(os.path.basename(f))[0]
         yield [ os.path.join(prefix, prefix+'.exome.vcf'), 
                 os.path.join('annotated-with-annovar', prefix+'.avinput')]
 
@@ -266,17 +290,6 @@ def prepare_annovar_inputs(vcf, output):
         ".format(vcf=vcf, out=output))
     
 
-@split(final_calls,'annotated-with-annovar/*.avinput') 
-def prepare_annovar_inputs2(multisample_vcf, outputs):
-    """ create an annovar file for every sample. needs to be run separately from the rest"""
-    os.mkdir('annotated-with-annovar')
-    output_prefix = 'annotated-with-annovar/sample'
-    run_cmd("convert2annovar.pl {vcf} -format vcf4 -withzyg -includeinfo \
-        -genoqual 3 -coverage 6 -allsample -outfile {output_prefix}".format(
-        vcf=multisample_vcf, 
-        output_prefix=output_prefix))
-    
- 
 def annotate_variants_with_functional_change(input_file, output_prefix):
     run_cmd("annotate_variation.pl -buildver hg19 -outfile {outfile_prefix} {input_file} {annodb}".format(
         outfile_prefix=output_prefix, 
@@ -292,8 +305,8 @@ def annotate_function_of_raw_variants(input, outputs):
     run_cmd("cut -f 1 {f} | sort | uniq -c > {f}.stats".format(f=outputs[0][:-len('.stats')]))
     run_cmd("cut -f 2 {f} | sort | uniq -c > {f}.stats".format(f=outputs[1][:-len('.stats')]))
     # remove the annovar files
-    remove(outputs[0][:-len('.stats')])
-    remove(outputs[1][:-len('.stats')])
+    os.remove(outputs[0][:-len('.stats')])
+    os.remove(outputs[1][:-len('.stats')])
 
 
 @transform(prepare_annovar_inputs, suffix('.avinput'), 
@@ -309,7 +322,7 @@ def filter_common_inhouse(input, outputs):
         annodb=annovar_human_db))
 
     for output_file in outputs: 
-               rename(output_file.replace('common_inhouse','hg19_generic'), output_file)
+        os.rename(output_file.replace('common_inhouse','hg19_generic'), output_file)
 
     
 @transform(filter_common_inhouse, suffix('.common_inhouse_filtered'),
