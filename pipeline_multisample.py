@@ -35,6 +35,7 @@ reference = os.path.join(script_path,'../reference/human_g1k_v37.clean.fasta')
 dbsnp = os.path.join(script_path,'../reference/dbsnp_137.b37.vcf')
 hapmap = os.path.join(script_path,'../reference/hapmap_3.3.b37.sites.vcf')
 omni = os.path.join(script_path,'../reference/1000G_omni2.5.b37.sites.vcf')
+indels_1kg = os.path.join(script_path,'../reference/1000G_phase1.indels.b37.vcf.gz')
 mills = os.path.join(script_path,'../reference/Mills_and_1000G_gold_standard.indels.b37.vcf')
 #capture = os.path.join(script_path,'../reference/Nimblegen_SeqCap_EZ_Exome_v2_37_targetRegOnly_g1k.bed')
 #exome = os.path.join(script_path,'../reference/Nimblegen_SeqCap_EZ_Exome_v2_37_targetRegOnly_wingspan_g1k.bed')
@@ -237,92 +238,7 @@ def split_seq(seq, num_pieces):
 def index_bam(bam):
     """Use samtools to create an index for the bam file"""
     run_cmd('samtools index %s' % bam)
-    
-def find_realigns(bam, intervals_file):
-    """Finds regions needing realignment"""
-    run_cmd("%s -Xmx4g -jar %s \
-             -T RealignerTargetCreator \
-             -I %s \
-             -R %s \
-             -o %s \
-             -nt %d" 
-             % (java, gatk, bam, reference, intervals_file, n_cpus))
-             
-def run_realigner(bam, intervals_file, realigned_bam):
-    """Performs local realignment of reads based on misalignments due to the presence of indels"""
-    run_cmd("%s -Xmx4g -jar %s \
-             -T IndelRealigner \
-             -I %s \
-             -R %s \
-             -targetIntervals %s \
-             -o %s" 
-             % (java, gatk, bam, reference, intervals_file, realigned_bam))
-
-# def dup_removal_picard(bam,output):
-#     """Use Picard to remove duplicates"""
-#     run_cmd('java -Xmx4096m -jar %s/CleanSam.jar INPUT=%s OUTPUT=%s VALIDATION_STRINGENCY=LENIENT VERBOSITY=ERROR CREATE_INDEX=TRUE' 
-#                 % (picard,bam,output))
-
- 
-def dup_removal_samtools(bam,output):
-    """Use samtools for dupremoval"""
-    run_cmd('samtools rmdup %s %s' % (bam,output))
-    
-# def dup_mark_picard(bam,output):
-#     """Use Picard to mark duplicates"""
-#     run_cmd('java -Xmx4096m -jar %s/MarkDuplicates.jar TMP_DIR=/export/astrakanfs/stefanj/tmp REMOVE_DUPLICATES=true INPUT=%s OUTPUT=%s METRICS_FILE=%s.dup_metrics VALIDATION_STRINGENCY=LENIENT VERBOSITY=ERROR CREATE_INDEX=true'
-#                 % (picard,bam,output,bam))
-
-def base_recalibrator(bam, recal_data):
-    """First pass of the recalibration step"""
-    run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx8g -jar %s \
-            -T BaseRecalibrator \
-            -R %s \
-            -knownSites %s \
-            -I %s \
-            -o %s \
-            -nct %d"
-            % (java, gatk, reference, dbsnp, bam, recal_data, n_cpus))
-
-def print_recalibrated(bam, recal_data, output):
-    """uses GATK to rewrite quality scores using the recal_data"""
-    run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx4g -jar %s \
-            -T PrintReads \
-            -R %s \
-            -I %s \
-            --out %s \
-            -BQSR %s \
-            -nct %d" 
-            % (java, gatk, reference, bam, output, recal_data, n_cpus) )
-            
-# def count_covariates(bam, recal_data):
-#     """Uses GATK to count covariates"""
-#     run_cmd("java -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx4g -jar %s \
-#             -T CountCovariates \
-#             -l INFO \
-#             -R %s \
-#             -knownSites %s \
-#             --default_platform illumina \
-#             -cov ReadGroupCovariate \
-#             -cov QualityScoreCovariate \
-#             -cov CycleCovariate \
-#             -cov DinucCovariate \
-#             -I %s \
-#             -recalFile %s"
-#             % (gatk, reference, dbsnp, bam, recal_data))
-            
-# def table_recalibration(bam, recal_data, output):
-#     """uses GATK to rewrite quality scores using the recal_data"""
-#     run_cmd("java -Xmx4g -jar %s \
-#             -T TableRecalibration \
-#             --default_platform illumina \
-#             -R %s \
-#             --preserve_qscores_less_than 5 \
-#             -l INFO \
-#             -I %s \
-#             --out %s \
-#             -recalFile %s" 
-#             % (gatk, reference, bam, output, recal_data) )
+              
 
 def reduce_reads(bam, output):
     """Reduces the BAM file using read based compression that keeps only essential information for variant calling"""
@@ -761,11 +677,24 @@ def index(input, output):
     """create bam index"""
     index_bam(input)
 
+
+
+# def dup_removal_picard(bam,output):
+#     """Use Picard to remove duplicates"""
+#     run_cmd('java -Xmx4096m -jar %s/CleanSam.jar INPUT=%s OUTPUT=%s VALIDATION_STRINGENCY=LENIENT VERBOSITY=ERROR CREATE_INDEX=TRUE' 
+#                 % (picard,bam,output))
+   
+# def dup_mark_picard(bam,output):
+#     """Use Picard to mark duplicates"""
+#     run_cmd('java -Xmx4096m -jar %s/MarkDuplicates.jar TMP_DIR=/export/astrakanfs/stefanj/tmp REMOVE_DUPLICATES=true INPUT=%s OUTPUT=%s METRICS_FILE=%s.dup_metrics VALIDATION_STRINGENCY=LENIENT VERBOSITY=ERROR CREATE_INDEX=true'
+#                 % (picard,bam,output,bam))
+
+
 #@follows(index)
 @transform(link, suffix(".bam"), '.dedup.bam')
-def remove_dups(input, output):
-    """Mark dups"""
-    dup_removal_samtools(input, output)
+def remove_dups(bam, output):
+    """Use samtools for dupremoval"""
+    run_cmd('samtools rmdup %s %s' % (bam,output))
     # remove(input)
 
 #@follows(remove_dups)
@@ -774,26 +703,51 @@ def index_dups(input, output):
     """create bam index"""
     index_bam(input)
 
+
 #@follows(index_dups)
-@transform(index_dups, suffix(".dedup.bam.bai"), '.realign.intervals', r'\1.dedup.bam')
-def find_realignment_intervals(foo, output, bam):
-   """Find regions to be re-aligned due to indels"""
-   find_realigns(bam, output)
+@transform(index_dups, suffix(".dedup.input_bam.bai"), '.realign.intervals', r'\1.dedup.input_bam')
+def find_realignment_intervals(foo, intervals, input_bam):
+    """Find regions to be re-aligned due to indels"""
+    run_cmd("%s -Xmx4g -jar %s \
+             -T RealignerTargetCreator \
+             -I %s \
+             -R %s \
+             -known %s \
+             -known %s \
+             -o %s \
+             -nt %d" 
+             % (java, gatk, input_bam, reference, indels_1kg, mills, intervals, n_cpus))
+
 
 #@follows(find_realignment_intervals)
-@transform(find_realignment_intervals, suffix(".realign.intervals"), '.realigned.bam', r'\1.dedup.bam')
-def indel_realigner(input, output, bam):
+@transform(find_realignment_intervals, suffix(".realign.intervals"), '.realigned.input_bam', r'\1.dedup.input_bam')
+def indel_realigner(intervals_file, realigned_bam, input_bam):
    """Re-aligns regions around indels"""
-   run_realigner(bam,input,output)
-   # remove(input)
+   run_cmd("%s -Xmx4g -jar %s \
+             -T IndelRealigner \
+             -I %s \
+             -R %s \
+             -targetIntervals %s \
+             -known %s \
+             -known %s \
+             -o %s" 
+             % (java, gatk, input_bam, reference, intervals_file, indels_1kg, mills, realigned_bam))
+
 
 #@follows(indel_realigner)
 @transform(indel_realigner, suffix('.realigned.bam'), '.gatk.bam.recal_data.grp')
-def recalibrate_baseq1(input, output):
-    """Base quality score recalibration in bam file
-        Part 1: count covariates"""
-    index_bam(input)
-    base_recalibrator(input, output)
+def recalibrate_baseq1(input_bam, output):
+    """Base quality score recalibration in bam file - first pass """
+    index_bam(input_bam)
+    run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx8g -jar %s \
+            -T BaseRecalibrator \
+            -R %s \
+            -knownSites %s \
+            -I %s \
+            -o %s \
+            -nct %d"
+            % (java, gatk, reference, dbsnp, input_bam, output, n_cpus))
+    
 
 # This custom check ensures that the recalibrate_baseq2 step is not run in --rebuild_mode if the .gatk.bam exists
 # This way metric_coverage target can be run after the intermediate files (e.g. .realigned.bam) are removed
@@ -807,10 +761,20 @@ def is_gatk_bam_missing(inputs, gatk_bam):
 @follows(recalibrate_baseq1)
 @transform(indel_realigner, suffix('.realigned.bam'), add_inputs(r'\1.gatk.bam.recal_data.grp'),'.gatk.bam')
 @check_if_uptodate(is_gatk_bam_missing)
-def recalibrate_baseq2(inputs, output):
+def recalibrate_baseq2(inputs, output_bam):
     """Base quality score recalibration in bam file
         Part 2: rewrite quality scores into a new bam file"""   
-    print_recalibrated(inputs[0], inputs[1], output)
+    bam = inputs[0]
+    recal_data = inputs[1]
+    run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx4g -jar %s \
+            -T PrintReads \
+            -R %s \
+            -I %s \
+            --out %s \
+            -BQSR %s \
+            -nct %d" 
+            % (java, gatk, reference, bam, output_bam, recal_data, n_cpus) )
+  
     # remove(inputs[0])
 
 
