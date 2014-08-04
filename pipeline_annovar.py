@@ -18,32 +18,16 @@ import os
 import glob
 import string
 
-#88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
-
-#   user definable options
-
-
-#88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
-
-#path to binaries
-script_path = os.path.dirname(os.path.relpath(__file__))
-
-# reference dbs
-annovar_human_db = os.path.join(script_path,'../tools/annovar/humandb')
-annovar_1000genomes_eur = '1000g2012apr_eur'
-annovar_inhouse_db = 'common_inhouse_variants_jan2014.txt'
-
-
 
 if __name__ == '__main__':
     from optparse import OptionParser
     import StringIO
 
-    parser = OptionParser(version="%prog 1.0", usage = "\n\n    %prog --bamdir BAM_DIR --target_regions EXOME.BED --groups NUMBER [more_options]")
-    parser.add_option("-b", "--bamdir", dest="bam_dir",
+    parser = OptionParser(version="%prog 1.0", usage = "\n\n    %prog --settings PIPELINE_SETTINGS.CFG --groups NUMBER [more_options]")
+    parser.add_option("-s", "--settings", dest="pipeline_settings",
                         metavar="FILE",
                         type="string",
-                        help="Directory containing all the bams for analysis.")
+                        help="File containing all the settings for the analysis.")
                         
 
 
@@ -118,7 +102,7 @@ if __name__ == '__main__':
     #       strings corresponding to the "dest" parameter
     #       in the options defined above
     #
-    mandatory_options = ['bam_dir']
+    mandatory_options = ['pipeline_settings']
 
     #vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
     #                                             #
@@ -146,6 +130,30 @@ if __name__ == '__main__':
     check_mandatory_options (options, mandatory_options, helpstr)
 
 
+
+
+
+    #vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+    #                                             #
+    #   Get pipeline settings from a config file  #
+    #                                             #
+    #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    import ConfigParser
+
+    config = ConfigParser.ConfigParser()
+    config.read(options.pipeline_settings)
+    # inputs 
+    input_bams = config.get('Inputs','input-bams')
+
+    # reference dbs
+    annovar_human_db = config.get('Resources','annovar-humandb-dir')
+    annovar_1000genomes_eur = config.get('Resources','annovar-1000genomes-eur')
+    annovar_inhouse_db = config.get('Resources','annovar-inhouse-db')
+    omim_gene_phenotype_map_file = config.get('Resources','omim_gene_phenotype_map')
+
+
+
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 
 #   imports
@@ -155,7 +163,6 @@ if __name__ == '__main__':
 
 from ruffus import *
 import subprocess
-import resource
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
@@ -272,7 +279,7 @@ def run_cmd(cmd_str):
 
 
 def generate_parameters():
-    bams = glob.glob(options.bam_dir + '/*.bam')
+    bams = glob.glob(input_bams)
     for f in bams:
         prefix = os.path.splitext(os.path.basename(f))[0]
         yield [ os.path.join(prefix, prefix+'.exome.vcf'), 
@@ -423,8 +430,8 @@ def get_omim_gene_phenotype_map(omim_file):
     f.close()
     return map_pht
 
-omim_gene_phenotype_map = get_omim_gene_phenotype_map(os.path.join(script_path,'../tools/annovar/omim/genemap2.txt'))
 
+omim_gene_phenotype_map = get_omim_gene_phenotype_map(omim_gene_phenotype_map_file)
 
 from utility_functions import quote_aware_split, parenthesis_aware_split
 
