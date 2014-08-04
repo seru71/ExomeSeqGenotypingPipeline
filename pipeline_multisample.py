@@ -19,29 +19,6 @@ import os
 import glob
 import string
 
-#88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
-
-#   user definable options
-
-
-#88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
-#path to binaries
-script_path = os.path.dirname(os.path.relpath(__file__))
-java = os.path.join(script_path,'../src/jre1.7.0/bin/java')
-picard = os.path.join(script_path,'../src/picard-tools')
-gatk = os.path.join(script_path,'../src/GenomeAnalysisTK/GenomeAnalysisTK.jar')
-#reference files
-reference = os.path.join(script_path,'../reference/human_g1k_v37.clean.fasta')
-dbsnp = os.path.join(script_path,'../reference/dbsnp_137.b37.vcf')
-hapmap = os.path.join(script_path,'../reference/hapmap_3.3.b37.sites.vcf')
-omni = os.path.join(script_path,'../reference/1000G_omni2.5.b37.sites.vcf')
-indels_1kg = os.path.join(script_path,'../reference/1000G_phase1.indels.b37.vcf.gz')
-mills = os.path.join(script_path,'../reference/Mills_and_1000G_gold_standard.indels.b37.vcf')
-#capture = os.path.join(script_path,'../reference/Nimblegen_SeqCap_EZ_Exome_v2_37_targetRegOnly_g1k.bed')
-#exome = os.path.join(script_path,'../reference/Nimblegen_SeqCap_EZ_Exome_v2_37_targetRegOnly_wingspan_g1k.bed')
-
-n_cpus = 2
-
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 
@@ -55,28 +32,11 @@ if __name__ == '__main__':
     from optparse import OptionParser
     import StringIO
 
-    parser = OptionParser(version="%prog 1.0", usage = "\n\n    %prog --bamdir BAM_DIR --target_regions EXOME.BED --groups NUMBER [more_options]")
-    parser.add_option("-b", "--bamdir", dest="bam_dir",
+    parser = OptionParser(version="%prog 1.0", usage = "\n\n    %prog --settings PIPELINE_SETTINGS.CFG --groups NUMBER [more_options]")
+    parser.add_option("-s", "--settings", dest="pipeline_settings",
                         metavar="FILE",
                         type="string",
-                        help="Directory containing all the bams for analysis.")
-                        
-#    parser.add_option("-r","--reference",dest="reference",
-#                      metavar="FILE", type="string",
-#                      default="../reference/human_g1k_v37.clean.fasta",
-#                      help="Fasta file with the reference genome")                 
-                     
-    parser.add_option("--cr","--capture_regions", dest="capture_regions",
-                      metavar="FILE", 
-                      type="string",
-                      default="../reference/Nimblegen_SeqCap_EZ_Exome_v2_37_targetRegOnly_g1k.bed", 
-                      help="Bed file with capture regions (used for depth calculations)")                    
-
-    parser.add_option("--er","--exome_regions", dest="exome_regions",
-                      metavar="FILE", 
-                      type="string", 
-                      default="../reference/Nimblegen_SeqCap_EZ_Exome_v2_37_targetRegOnly_wingspan_g1k.bed",
-                      help="Bed file with exome regions (used for filtering; can be wider than capture regions)")                    
+                        help="File containing all the settings for the analysis.")                  
                             
     parser.add_option("-g", "--groups", dest="groups",
                         type="int",
@@ -156,7 +116,7 @@ if __name__ == '__main__':
     #       strings corresponding to the "dest" parameter
     #       in the options defined above
     #
-    mandatory_options = ['bam_dir']
+    mandatory_options = ['pipeline_settings']
 
     #vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
     #                                             #
@@ -181,7 +141,40 @@ if __name__ == '__main__':
                         ("s" if len(missing_options) > 1 else "",
                          ", ".join(missing_options),
                          helpstr))
+        
     check_mandatory_options (options, mandatory_options, helpstr)
+
+
+    #vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+    #                                             #
+    #   Get pipeline settings from a config file  #
+    #                                             #
+    #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    import ConfigParser
+
+    config = ConfigParser.ConfigParser()
+    config.read(options.pipeline_settings)
+    # inputs 
+    input_bams = config.get('Inputs','input-bams')
+    # reference files
+    reference = config.get('Resources','reference-genome')
+    dbsnp = config.get('Resources','dbsnp-vcf')
+    hapmap = config.get('Resources','hapmap-vcf')
+    omni = config.get('Resources','1000genomes-omni-vcf')
+    indels_1kg = config.get('Resources','1000genomes-indels-vcf')
+    mills = config.get('Resources','mills-indels-vcf')
+    capture = config.get('Resources','capture-regions-bed')
+    exome = config.get('Resources', 'exome-regions-bed')
+    # tools 
+    java = config.get('Tools','java-binary')
+    picard = config.get('Tools','picard-tools-path')
+    gatk = config.get('Tools','gatk-jar')
+    # other
+    n_cpus = config.getint('Other','n-cpus')
+
+
+
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
@@ -277,11 +270,7 @@ def bam_alignment_metrics(bam,metrics):
              ))
 
 def filter_by_exome_region(vcf, output):
-    """Apply filters to the vcf file to limit calling to exome region"""
-    
-    exome = options.exome_regions 
-    if exome==None or exome=="": exome = options.capture_regions 
-    
+    """Apply filters to the vcf file to limit calling to exome region"""   
     run_cmd("vcftools --vcf %s \
              --out %s \
              --recode \
@@ -647,11 +636,11 @@ if __name__ == '__main__':
 #       Put pipeline code here
 
 def get_sample_ids():
-    files = glob.glob(options.bam_dir + '/*.bam')
+    files = glob.glob(input_bams)
     return [ os.path.splitext(os.path.basename(file))[0] for file in files ]
 
 def generate_parameters():
-    files = glob.glob(options.bam_dir + '/*.bam')
+    files = glob.glob(input_bams)
     parameters = []
     for file in files:
         prefix = os.path.splitext(os.path.basename(file))[0]
@@ -660,7 +649,7 @@ def generate_parameters():
             yield job_parameters
 
 def get_num_files():
-    files = glob.glob(options.bam_dir + '/*.bam')
+    files = glob.glob(input_bams)
     return len(files)
 
 @files(generate_parameters)
@@ -810,7 +799,7 @@ def metric_coverage(input, output, output_format):
                 reference=reference,
                 output=output_format,
                 input=input,
-                capture=options.capture_regions
+                capture=capture
             ))
 
 # long running, memory demanding and not very useful
@@ -827,7 +816,7 @@ def metric_coverage_multisample(bams, output):
         ".format(java=java, gatk=gatk,
                 reference=reference,
                 output=output,
-                capture=options.capture_regions)
+                capture=capture)
 
     for bam in bams:
         cmd += " -I {}".format(bam)
