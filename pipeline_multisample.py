@@ -162,6 +162,7 @@ if __name__ == '__main__':
     dbsnp = config.get('Resources','dbsnp-vcf')
     hapmap = config.get('Resources','hapmap-vcf')
     omni = config.get('Resources','1000genomes-omni-vcf')
+    snps_1kg = config.get('Resources','1000genomes-snps-vcf')
     indels_1kg = config.get('Resources','1000genomes-indels-vcf')
     mills = config.get('Resources','mills-indels-vcf')
     capture = config.get('Resources','capture-regions-bed')
@@ -220,29 +221,10 @@ def remove(file):
     """remove file"""
     os.remove(file)
                             
-def split_seq(seq, num_pieces):
-    """ split a list into pieces passed as param """
-    start = 0
-    for i in xrange(num_pieces):
-        stop = start + len(seq[i::num_pieces])
-        yield seq[start:stop]
-        start = stop
-
 def index_bam(bam):
     """Use samtools to create an index for the bam file"""
     run_cmd('samtools index %s' % bam)
-              
-
-def reduce_reads(bam, output):
-    """Reduces the BAM file using read based compression that keeps only essential information for variant calling"""
-    run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx15g -jar %s \
-            -T ReduceReads \
-            -R %s \
-            -I %s \
-            -o %s"
-            % (java, gatk, reference, bam, output))
-            
-
+                          
 def bam_quality_score_distribution(bam,qs,pdf):
     """Calculates quality score distribution histograms"""
     run_cmd("java -jar {picard}/QualityScoreDistribution.jar \
@@ -268,283 +250,63 @@ def bam_alignment_metrics(bam,metrics):
                  output=metrics,
                  bam=bam
              ))
-
-def filter_by_exome_region(vcf, output):
-    """Apply filters to the vcf file to limit calling to exome region"""   
-    run_cmd("vcftools --vcf %s \
-             --out %s \
-             --recode \
-             --bed %s \
-             --keep-INFO-all "
-            % (vcf, output, exome))
-
-def multisample_variant_call(files, output):
-    """Perform multi-sample variant calling using GATK"""
-    cmd = "nice %s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx8g -jar %s \
-            -T UnifiedGenotyper \
-            -R %s \
-            -o %s \
-            -glm BOTH \
-            -nt %s \
-            --dbsnp %s " % (java, gatk, reference, output, options.jobs, dbsnp)
-    for file in files:
-        cmd = cmd + '-I {} '.format(file)
-    #log the results
-    cmd = cmd + '&> {}.log'.format(output)
-    run_cmd(cmd)
-
-def multisample_haplotype_call(files, output):
-    """Perform multi-sample variant calling using GATK"""
-    cmd = "nice %s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx24g -jar %s \
-            -T HaplotypeCaller \
-            -R %s \
-            -o %s \
-            -minPruning 4 \
-            -stand_call_conf 50.0 \
-            -stand_emit_conf 30.0 \
-            -L %s \
-            -nct %s \
-            --dbsnp %s " % (java, gatk, reference, output, capture, options.jobs, dbsnp)
-    for file in files:
-        cmd = cmd + '-I {} '.format(file)
-    #log the results
-    cmd = cmd + '&> {}.log'.format(output)
-    run_cmd(cmd)
     
-def merge_batch_vcf(vcfs, output):
-    """Merges vcf files from the batch run"""
-    if len(vcfs) == 1:
-        run_cmd('cp {vcf} {output}'.format(vcf = vcfs[0], output = output))
-    else:
-        merging = ''
-        for i in range(len(vcfs)):
-            merging = merging + ' -V:batch{number} {file}'.format(number=i,file=vcfs[i])
-        run_cmd("{java} -Xmx4g -jar {gatk} \
-                -R {reference} \
-                -T CombineVariants \
-                -o {output} \
-                {files}".format(
-                    java=java,
-                    gatk=gatk,
-                    reference=reference,
-                    output=output,
-                    files=merging
-                )) 
-            
-def merge_indel_and_snp_vcf(snp,indel, output):
-    """Merges vcf files from the batch run"""
+def bam_coverage_metrics(input_bam, output):
+    """ Calculates and outputs bam coverage statistics """
     run_cmd("{java} -Xmx4g -jar {gatk} \
             -R {reference} \
-            -T CombineVariants \
-            -V:SNP {snp} \
-            -V:INDEL {indel} \
-            -o {output}".format(
-                java=java,
-                gatk=gatk,
-                reference=reference,
-                snp=snp,
-                indel=indel,
-                output=output
-            )) 
-
-#
-# what if there is multiple alt alleles??? is the first one most covered  
-#
-def split_variants_by_sample(vcf, sample, output, ad_threshold=5, dp_threshold=8):
-    
-    run_cmd("{java} -Xmx2g -jar {gatk} -R {ref} \
-            -T SelectVariants \
-            --variant {vcf} \
-            -sn {sample} \
-            -select 'vc.getGenotype(\"{sample}\").getAD().1 >= {ad_thr} && vc.getGenotype(\"{sample}\").getDP() >= {dp_thr}' \
-            -o {out} \
-            ".format(java=java, gatk=gatk, ref=reference, 
-                vcf=vcf, sample=sample, out=output, 
-                ad_thr=ad_threshold, 
-                dp_thr=dp_threshold))
-
-def split_snps(vcf,snp_file):
-    """Select for snps in the vcf file"""
-    run_cmd("{} -Xmx2g -jar {} -R {} -T SelectVariants \
-            --variant {} -selectType SNP\
-            -o {}".format(java, gatk,reference,vcf,snp_file))
-            
-def split_indels(vcf,indel_file):
-    """Select for indels in the vcf file"""
-    run_cmd("{} -Xmx2g -jar {} -R {} -T SelectVariants \
-            --variant {} -selectType INDEL\
-            -o {}".format(java, gatk,reference,vcf,indel_file))
-
-def variant_annotator(bam, vcf, output):
-    run_cmd("{java} -Xmx16g -jar {gatk} \
-            -R {reference} \
-            -T VariantAnnotator \
-            -I {bam} \
+            -T DepthOfCoverage \
             -o {output} \
-            -A Coverage \
-            --variant {vcf} \
-            --dbsnp {dbsnp} \
+            -I {input} \
+            -L {capture} \
+            -ct 8 -ct 20 -ct 30 \
+            --omitDepthOutputAtEachBase --omitLocusTable \
             ".format(java=java, gatk=gatk,
-                bam=bam,
                 reference=reference,
                 output=output,
-                vcf=vcf,
-                dbsnp=dbsnp
+                input=input_bam,
+                capture=capture
             ))
 
-def recalibrate_snps(vcf,output):
-    """Runs VariantRecalibrator on the snps file"""
-    cmd = "{java} -Xmx16g -jar {gatk} \
-            -T VariantRecalibrator \
-            -R {reference}  \
-            -input {input} \
-            --maxGaussians 6 \
-            -percentBad 0.01 -minNumBad 1000 \
-            -resource:hapmap,known=false,training=true,truth=true,prior=15.0 {hapmap} \
-            -resource:omni,known=false,training=true,truth=false,prior=12.0 {omni} \
-            -resource:dbsnp,known=true,training=false,truth=false,prior=2.0 {dbsnp} \
-            -an QD -an HaplotypeScore -an MQRankSum -an ReadPosRankSum -an FS -an MQ \
-            -mode SNP \
-            -recalFile {output} \
-            -tranchesFile {tranches} \
-            -rscriptFile {plots}\
-            -nt {num_jobs}".format(
-                java=java,
-                gatk=gatk,
-                reference=reference,
-                hapmap=hapmap,
-                omni=omni,
-                dbsnp=dbsnp,
-                input=vcf,
-                output=output,
-                tranches=output+'.tranches',
-                plots=output+'.plots.R',
-                num_jobs=options.jobs
-            )
-    if get_num_files() > 10:
-        cmd += " -an InbreedingCoeff"
-    run_cmd(cmd)
-
-def recalibrate_indels(vcf,output):
-    """Runs VariantRecalibrator on the indels file"""
-    cmd = "{java} -Xmx16g -jar {gatk} \
-            -T VariantRecalibrator \
-            -R {reference}  \
-            -input {input} \
-            --maxGaussians 4 \
-            -percentBad 0.01 \
-            -minNumBad 1000 \
-            -resource:mills,known=false,training=true,truth=true,prior=12.0 {mills} \
-            -resource:dbsnp,known=true,training=false,truth=false,prior=2.0 {dbsnp} \
-            -an DP -an FS -an ReadPosRankSum -an MQRankSum \
-            -mode INDEL \
-            -recalFile {output} \
-            -tranchesFile {tranches} \
-            -rscriptFile {plots}\
-            -nt {num_jobs}".format(
-                java=java,
-                gatk=gatk,
-                reference=reference,
-                mills=mills,
-                dbsnp=dbsnp,
-                input=vcf,
-                output=output,
-                tranches=output+'.tranches',
-                plots=output+'.plots.R',
-                num_jobs=options.jobs
-            )
-    if get_num_files() > 10:
-        cmd += " -an InbreedingCoeff"
-    run_cmd(cmd)
-
-def apply_recalibration_snps(vcf,recal,tranches,output):
-    """Apply the recalibration tranch file calculated in recalibrate_snps"""
-    run_cmd("{java} -Xmx16g -jar {gatk} \
-            -T ApplyRecalibration \
-            -R {reference} \
-            -input {vcf} \
-            --ts_filter_level 99.9 \
-            -tranchesFile {tranches}  \
-            -recalFile {recal} \
-            -mode SNP \
-            -nt {num_jobs} \
-            -o {output}".format(
-                java=java,
-                gatk=gatk,
-                reference=reference,
-                vcf=vcf,
-                tranches=tranches,
-                recal=recal,
-                output=output,
-                num_jobs=options.jobs
-            ))
-
-def apply_recalibration_indels(vcf,recal,tranches,output):
-    """Apply the recalibration tranch file calculated in recalibrate_snps"""
-    run_cmd("{java} -Xmx16g -jar {gatk} \
-            -T ApplyRecalibration \
-            -R {reference} \
-            -input:name,VCF {vcf} \
-            --ts_filter_level 99.9 \
-            -tranchesFile {tranches}  \
-            -recalFile {recal} \
-            -mode INDEL \
-            -nt {num_jobs} \
-            -o {output}".format(
-                java=java,
-                gatk=gatk,
-                reference=reference,
-                vcf=vcf,
-                tranches=tranches,
-                recal=recal,
-                output=output,
-                num_jobs=options.jobs
-            ))
-
-def mark_filtered_variants(vcf, output):
-    """filter vcf"""
-    run_cmd('{java} -Xmx12g -jar {gatk} \
-            -T VariantFiltration \
-            -o {output} \
-            --variant {input} \
-            --filterExpression "QD < 3.0" \
-            --filterExpression "DP < 6" \
-            --filterName QDFilter   \
-            --filterName DPFilter   \
-            -R {reference}'.format(
-                java=java,
-                gatk=gatk,
-                output=output,
-                input=vcf,
-                reference=reference
-            ))
-# 
-def remove_filtered(vcf,output):
-    """Remove filtered variants"""
-    run_cmd("{java} -Xmx12g -jar {gatk} \
-            -T SelectVariants \
-            -R {reference} \
-            --variant {input} \
-            -o {output} \
-            -env -ef".format(
-                java=java,
-                gatk=gatk,
-                reference=reference,
-                input=vcf,
-                output=output
-            ))
-
-def cleanup_files():
-    run_cmd("rm -rf */*.recal_data.csv */*.realign* */*.dedup* */*.log *.log \
-            *.to_filter* multisample.gatk.snp.recal batch* \
-            multisample.gatk.recalibratedSNPS.rawIndels.vcf \
-            multisample.gatk.indel.model.* multisample.gatk.snp.model.* \
-            multisample.gatk.analysisReady.vcf.vcfidx \
-            multisample.gatk.analysisReady.vcf.idx \
-            multisample.gatk.recalibratedSNPS.rawIndels.vcf.idx \
-            ")
-#            multisample.gatk.analysisReady.vcf \
     
+#
+#
+# The two functions below seem redundant
+#
+#    
+#            
+#def merge_indel_and_snp_vcf(snp,indel, output):
+#    """Merges vcf files from the batch run"""
+#    run_cmd("{java} -Xmx4g -jar {gatk} \
+#            -R {reference} \
+#            -T CombineVariants \
+#            -V:SNP {snp} \
+#            -V:INDEL {indel} \
+#            -o {output}".format(
+#                java=java,
+#                gatk=gatk,
+#                reference=reference,
+#                snp=snp,
+#                indel=indel,
+#                output=output
+#            )) 
+#
+#def variant_annotator(bam, vcf, output):
+#    run_cmd("{java} -Xmx16g -jar {gatk} \
+#            -R {reference} \
+#            -T VariantAnnotator \
+#            -I {bam} \
+#            -o {output} \
+#            -A Coverage \
+#            --variant {vcf} \
+#            --dbsnp {dbsnp} \
+#            ".format(java=java, gatk=gatk,
+#                bam=bam,
+#                reference=reference,
+#                output=output,
+#                vcf=vcf,
+#                dbsnp=dbsnp
+#            )) 
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
@@ -652,6 +414,11 @@ def get_num_files():
     files = glob.glob(input_bams)
     return len(files)
 
+#
+#
+# Prepare input directory structure
+#
+
 @files(generate_parameters)
 def link(none, bam, extra):
     """Make working directory and make symlink to bam file"""
@@ -667,24 +434,39 @@ def index(input, output):
     index_bam(input)
 
 
+#
+#
+# Prepare the bam files for variant calling
+#
 
-# def dup_removal_picard(bam,output):
-#     """Use Picard to remove duplicates"""
-#     run_cmd('java -Xmx4096m -jar %s/CleanSam.jar INPUT=%s OUTPUT=%s VALIDATION_STRINGENCY=LENIENT VERBOSITY=ERROR CREATE_INDEX=TRUE' 
-#                 % (picard,bam,output))
+def dup_removal_picard(bam,output):
+    """Use Picard to remove duplicates"""
+    run_cmd('%s -Xmx4096m -jar %s/CleanSam.jar \
+             INPUT=%s \
+             OUTPUT=%s \
+             VALIDATION_STRINGENCY=LENIENT VERBOSITY=ERROR CREATE_INDEX=TRUE' 
+             % (java, picard, bam, output))
    
-# def dup_mark_picard(bam,output):
-#     """Use Picard to mark duplicates"""
-#     run_cmd('java -Xmx4096m -jar %s/MarkDuplicates.jar TMP_DIR=/export/astrakanfs/stefanj/tmp REMOVE_DUPLICATES=true INPUT=%s OUTPUT=%s METRICS_FILE=%s.dup_metrics VALIDATION_STRINGENCY=LENIENT VERBOSITY=ERROR CREATE_INDEX=true'
-#                 % (picard,bam,output,bam))
+def dup_mark_picard(bam,output):
+    """Use Picard to mark duplicates"""
+    run_cmd('%s -Xmx4096m -jar %s/MarkDuplicates.jar \
+            TMP_DIR=/export/astrakanfs/stefanj/tmp \
+            REMOVE_DUPLICATES=true \
+            INPUT=%s \
+            OUTPUT=%s \
+            METRICS_FILE=%s.dup_metrics \
+            VALIDATION_STRINGENCY=LENIENT VERBOSITY=ERROR CREATE_INDEX=true'
+            % (java, picard, bam, output, bam))
 
 
 #@follows(index)
 @transform(link, suffix(".bam"), '.dedup.bam')
 def remove_dups(bam, output):
     """Use samtools for dupremoval"""
-    run_cmd('samtools rmdup %s %s' % (bam,output))
+    #run_cmd('samtools rmdup %s %s' % (bam,output))
+    dup_mark_picard(bam, output)
     # remove(input)
+
 
 #@follows(remove_dups)
 @transform(remove_dups, suffix(".dedup.bam"), '.dedup.bam.bai')
@@ -769,7 +551,7 @@ def recalibrate_baseq2(inputs, output_bam):
 
 #
 #
-# QC measurements
+# BAM-level QC measurements
 #
 
 #@follows(recalibrate_baseq2)
@@ -778,29 +560,19 @@ def metric_quality_score_distribution(input,output):
     """docstring for metrics1"""
     bam_quality_score_distribution(input, output, output + '.pdf')
 
+
 #@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.metrics')
 def metric_alignment(input,output):
     """docstring for metrics1"""
     bam_alignment_metrics(input, output)
 
+
 #@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.coverage.sample_summary', r'\1.coverage')
-def metric_coverage(input, output, output_format):
-       run_cmd("{java} -Xmx4g -jar {gatk} \
-            -R {reference} \
-            -T DepthOfCoverage \
-            -o {output} \
-            -I {input} \
-            -L {capture} \
-            -ct 8 -ct 20 -ct 30 \
-            --omitDepthOutputAtEachBase --omitLocusTable \
-            ".format(java=java, gatk=gatk,
-                reference=reference,
-                output=output_format,
-                input=input,
-                capture=capture
-            ))
+def metric_coverage(input_bam, output, output_format):
+    bam_coverage_metrics(input_bam, output_format)
+
 
 # long running, memory demanding and not very useful
 @merge(recalibrate_baseq2, 'multisample.coverage')
@@ -823,18 +595,74 @@ def metric_coverage_multisample(bams, output):
 
     run_cmd(cmd)
 
+@follows(metric_quality_score_distribution, metric_alignment, metric_coverage)
+def gatk_bam_qc:
+    """ Aggregates gatk_bam quality control steps """
+    pass
+
+
 
 #
 #
-# bam reduce & variant calling
+# Bam reduce & (batch) variant calling using UnifiedGenotyper
 #
 
 
 @jobs_limit(6)
 #@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.reduced.bam')
-def reduce_bam(input, output):
-    reduce_reads(input,output)
+def reduce_bam(bam, output):
+    """Reduces the BAM file using read based compression that keeps only essential information for variant calling"""
+    run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx15g -jar %s \
+            -T ReduceReads \
+            -R %s \
+            -I %s \
+            -o %s"
+            % (java, gatk, reference, bam, output))
+
+
+def split_seq(seq, num_pieces):
+    """ split a list into pieces passed as param """
+    start = 0
+    for i in xrange(num_pieces):
+        stop = start + len(seq[i::num_pieces])
+        yield seq[start:stop]
+        start = stop
+
+def multisample_variant_call(files, output):
+    """Perform multi-sample variant calling using GATK"""
+    cmd = "nice %s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx8g -jar %s \
+            -T UnifiedGenotyper \
+            -R %s \
+            -o %s \
+            -glm BOTH \
+            -nt %s \
+            --dbsnp %s " % (java, gatk, reference, output, options.jobs, dbsnp)
+    for file in files:
+        cmd = cmd + '-I {} '.format(file)
+    #log the results
+    cmd = cmd + '&> {}.log'.format(output)
+    run_cmd(cmd)
+    
+def merge_batch_vcf(vcfs, output):
+    """Merges vcf files from the batch run"""
+    if len(vcfs) == 1:
+        run_cmd('cp {vcf} {output}'.format(vcf = vcfs[0], output = output))
+    else:
+        merging = ''
+        for i in range(len(vcfs)):
+            merging = merging + ' -V:batch{number} {file}'.format(number=i,file=vcfs[i])
+        run_cmd("{java} -Xmx4g -jar {gatk} \
+                -R {reference} \
+                -T CombineVariants \
+                -o {output} \
+                {files}".format(
+                    java=java,
+                    gatk=gatk,
+                    reference=reference,
+                    output=output,
+                    files=merging
+                )) 
 
 @merge(reduce_bam, 'multisample.gatk.vcf')
 def call_variants(infiles, output):
@@ -851,59 +679,215 @@ def call_variants(infiles, output):
         remove(batch)
         remove(batch + '.idx')
 
+
 # @follows('call_variants')
 # @files('multisample.gatk.vcf', ['multisample.gatk.snp.vcf','multisample.gatk.indel.vcf'])
-# def split_snps_and_indels(input,output):
+# def split_snps_and_indels(vcf, outputs):
 #     """Separates the vcf file into only snp calls"""
-#     split_snps(input,output[0])
-#     split_indels(input,output[1])
+#    run_cmd("{} -Xmx2g -jar {} -R {} -T SelectVariants \
+#            --variant {} -selectType SNP\
+#            -o {}".format(java, gatk,reference,vcf, outputs[0]))
+#    run_cmd("{} -Xmx2g -jar {} -R {} -T SelectVariants \
+#            --variant {} -selectType INDEL\
+#            -o {}".format(java, gatk,reference,vcf,outputs[1]))
 
-@follows(call_variants)
+
+#
+#
+# Ganotyping using HaplotypeCaller
+#
+
+@merge(recalibrate_baseq2, 'multisample.gatk.gvcf')
+def call_haplotypes(bams, output):
+    """Perform multi-sample variant calling using GATK HaplotypeCaller"""
+    cmd = "nice %s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx24g -jar %s \
+            -T HaplotypeCaller \
+            -R %s \
+            -o %s \
+            --emitRefConfidence GVCF \
+            -minPruning 4 \
+            -L %s \
+            -nct %s \
+            --dbsnp %s " % (java, gatk, reference, output, exome, options.jobs, dbsnp)
+#             -stand_call_conf 50.0 \
+    for bam in bams:
+        cmd = cmd + '-I {} '.format(bam)
+    #log the results
+    cmd = cmd + '&> {}.log'.format(output)
+    run_cmd(cmd)
+
+
+#
+#
+# Variant recalibration and filtering
+# 
+
+#@follows(call_variants)
+@follows(call_haplotypes)
 @files('multisample.gatk.vcf', ['multisample.gatk.snp.model','multisample.gatk.snp.model.tranches'])
-def find_snp_tranches_for_recalibration(input,output):
-    """Run variantRecalibration for trusted sites"""
-    recalibrate_snps(input,output[0])
+def find_snp_tranches_for_recalibration(vcf,outputs):
+    """Runs VariantRecalibrator on snps"""
+    cmd = "{java} -Xmx16g -jar {gatk} \
+            -T VariantRecalibrator \
+            -R {reference}  \
+            -input {input} \
+            -resource:hapmap,known=false,training=true,truth=true,prior=15.0 {hapmap} \
+            -resource:omni,known=false,training=true,truth=true,prior=12.0 {omni} \
+            -resource:1000G,known=false,training=true,truth=false,prior=10.0 {snps_1kg} \
+            -resource:dbsnp,known=true,training=false,truth=false,prior=2.0 {dbsnp} \
+            -an QD -an MQ -an MQRankSum -an ReadPosRankSum -an FS -an HaplotypeScore \
+            -mode SNP \
+            -recalFile {output} \
+            -tranchesFile {tranches} \
+            -rscriptFile {plots}\
+            -nt {num_jobs}".format(
+                java=java,
+                gatk=gatk,
+                reference=reference,
+                hapmap=hapmap,
+                omni=omni,
+                snps_1kg=snps_1kg,
+                dbsnp=dbsnp,
+                input=vcf,
+                output=outputs[0],
+                tranches=outputs[1],
+                plots=outputs[0]+'.plots.R',
+                num_jobs=options.jobs
+            )
+    if get_num_files() > 10:
+        cmd += " -an InbreedingCoeff"
+    run_cmd(cmd)
+
 
 @follows(find_snp_tranches_for_recalibration)
 @files('multisample.gatk.vcf', ['multisample.gatk.indel.model','multisample.gatk.indel.model.tranches'])
-def find_indel_tranches_for_recalibration(input,output):
-    """Run variantRecalibration for trusted sites"""
-    recalibrate_indels(input,output[0])
+def find_indel_tranches_for_recalibration(vcf,outputs):
+    """Runs VariantRecalibrator on indels"""
+    cmd = "{java} -Xmx16g -jar {gatk} \
+            -T VariantRecalibrator \
+            -R {reference}  \
+            -input {input} \
+            --maxGaussians 4 \
+            -resource:mills,known=false,training=true,truth=true,prior=12.0 {mills} \
+            -resource:dbsnp,known=true,training=false,truth=false,prior=2.0 {dbsnp} \
+            -an QD -an FS -an ReadPosRankSum -an MQRankSum \
+            -mode INDEL \
+            -recalFile {output} \
+            -tranchesFile {tranches} \
+            -rscriptFile {plots}\
+            -nt {num_jobs}".format(
+                java=java,
+                gatk=gatk,
+                reference=reference,
+                mills=mills,
+                dbsnp=dbsnp,
+                input=vcf,
+                output=outputs[0],
+                tranches=outputs[1],
+                plots=outputs[0]+'.plots.R',
+                num_jobs=options.jobs
+            )
+    if get_num_files() > 10:
+        cmd += " -an InbreedingCoeff"
+    run_cmd(cmd)
+
+
+def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP'):
+    """Apply the recalibration tranch file to either snps or indels (depending on mode=SNP or mode=INDEL"""
+    run_cmd("{java} -Xmx16g -jar {gatk} \
+            -T ApplyRecalibration \
+            -R {reference} \
+            -input {vcf} \
+            --ts_filter_level 99.9 \
+            -tranchesFile {tranches}  \
+            -recalFile {recal} \
+            -mode {mode} \
+            -nt {num_jobs} \
+            -o {output}".format(
+                java=java,
+                gatk=gatk,
+                reference=reference,
+                vcf=vcf,
+                tranches=tranches,
+                recal=recal,
+                mode=mode,
+                num_jobs=options.jobs,
+                output=output
+            ))
+
 
 @follows(find_indel_tranches_for_recalibration)
 @files(['multisample.gatk.vcf','multisample.gatk.snp.model','multisample.gatk.snp.model.tranches'],'multisample.gatk.recalibratedSNPS.rawIndels.vcf')
 def apply_recalibration_filter_snps(input,output):
-    apply_recalibration_snps(input[0],input[1],input[2],output)
+    apply_recalibration_to_snps_or_indels(input[0],input[1],input[2],output,mode='SNP')
     # remove(input[0])
     #     remove(input[1])
     #     remove(input[2])
 
+
 @follows(apply_recalibration_filter_snps)
 @files(['multisample.gatk.recalibratedSNPS.rawIndels.vcf','multisample.gatk.indel.model','multisample.gatk.indel.model.tranches'],'multisample.gatk.preHardFiltering.vcf')
 def apply_recalibration_filter_indels(input,output):
-    apply_recalibration_indels(input[0],input[1],input[2],output)
+    apply_recalibration_to_snps_or_indels(input[0],input[1],input[2],output,mode='INDEL')
 
-@follows(apply_recalibration_filter_indels)
-@files('multisample.gatk.preHardFiltering.vcf', 'multisample.gatk.markedHardFiltering.vcf')
-def apply_filter(input,output):
+
+#@follows(apply_recalibration_filter_indels)
+#@files('multisample.gatk.preHardFiltering.vcf', 'multisample.gatk.markedHardFiltering.vcf')
+@transform(apply_recalibration_filter_indels, suffix('.preHardFiltering.vcf'), '.markedHardFiltering.vcf')
+def filter_variants(input, output):
     """docstring for apply_indel_filter"""
-    mark_filtered_variants(input,output)
+    run_cmd('{java} -Xmx12g -jar {gatk} \
+            -T VariantFiltration \
+            -o {output} \
+            --variant {input} \
+            --filterExpression "QD < 3.0" \
+            --filterExpression "DP < 6" \
+            --filterName QDFilter   \
+            --filterName DPFilter   \
+            -R {reference}'.format(
+                java=java,
+                gatk=gatk,
+                output=output,
+                input=input,
+                reference=reference
+            ))
     # remove(input)
 
-@follows(apply_filter)
-@files('multisample.gatk.markedHardFiltering.vcf', 'multisample.gatk.analysisReady.vcf')
-def filter_variants(infile,outfile):
-    """Filter variants that passed"""
-    remove_filtered(infile,outfile)
-    # remove(infile)
 
-@follows(filter_variants)
-@transform(filter_variants,suffix('.analysisReady.vcf'),'.analysisReady.exome.vcf')
-def final_calls(input,output):
-    """Produce the final variant calls"""
+#@follows(filter_variants)
+#@files('multisample.gatk.markedHardFiltering.vcf', 'multisample.gatk.analysisReady.vcf')
+@transform(filter_variants, suffix('.markedHardFiltering.vcf'), '.analysisReady.vcf')
+def remove_filtered(input,output):
+    """Remove filtered variants"""
+    run_cmd("{java} -Xmx12g -jar {gatk} \
+            -T SelectVariants \
+            -R {reference} \
+            --variant {input} \
+            -o {output} \
+            -env -ef".format(
+                java=java,
+                gatk=gatk,
+                reference=reference,
+                input=input,
+                output=output
+            ))
+    # remove(input)
+
+
+#@follows(remove_filtered)
+@transform(remove_filtered, suffix('.analysisReady.vcf'),'.analysisReady.exome.vcf')
+def final_calls(vcf, output):
+    """ Produce the final variant calls in the exome regions """
     output = output[:-10]
-    filter_by_exome_region(input, output)
+    # apply filters to the vcf file to limit calling to exome region    
+    run_cmd("vcftools --vcf %s \
+             --out %s \
+             --recode \
+             --bed %s \
+             --keep-INFO-all "
+            % (vcf, output, exome))
     rename('multisample.gatk.analysisReady.recode.vcf','multisample.gatk.analysisReady.exome.vcf')
+
 
 def split_snp_parameters():
     exome_vcf = 'multisample.gatk.analysisReady.exome.vcf'
@@ -913,10 +897,33 @@ def split_snp_parameters():
 @posttask(cleanup_files)
 @follows('final_calls')
 @files(split_snp_parameters)
-def split_snps(input, output, sample):
+def split_snps(vcf, output, sample):
     """ Split variants by sample, and use sample-specific statistics to filter: AD and DP"""
-    split_variants_by_sample(input, sample, output, ad_threshold=5, dp_threshold=8)
+    AD_threshold=5
+    DP_threshold=8
+    # what if there is multiple alt alleles??? is the first one most covered      
+    run_cmd("{java} -Xmx2g -jar {gatk} -R {ref} \
+            -T SelectVariants \
+            --variant {vcf} \
+            -sn {sample} \
+            -select 'vc.getGenotype(\"{sample}\").getAD().1 >= {ad_thr} && vc.getGenotype(\"{sample}\").getDP() >= {dp_thr}' \
+            -o {out} \
+            ".format(java=java, gatk=gatk, ref=reference, 
+                vcf=vcf, sample=sample, out=output, 
+                ad_thr=AD_threshold, 
+                dp_thr=DP_threshold))
 
+
+def cleanup_files():
+    run_cmd("rm -rf */*.recal_data.csv */*.realign* */*.dedup* */*.log *.log \
+            *.to_filter* multisample.gatk.snp.recal batch* \
+            multisample.gatk.recalibratedSNPS.rawIndels.vcf \
+            multisample.gatk.indel.model.* multisample.gatk.snp.model.* \
+            multisample.gatk.analysisReady.vcf.vcfidx \
+            multisample.gatk.analysisReady.vcf.idx \
+            multisample.gatk.recalibratedSNPS.rawIndels.vcf.idx \
+            ")
+#            multisample.gatk.analysisReady.vcf \
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 
