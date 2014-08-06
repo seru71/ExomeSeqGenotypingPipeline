@@ -476,7 +476,7 @@ def index_dups(input, output):
 
 
 #@follows(index_dups)
-@transform(index_dups, suffix(".dedup.input_bam.bai"), '.realign.intervals', r'\1.dedup.input_bam')
+@transform(index_dups, suffix(".dedup.bam.bai"), '.realign.intervals', r'\1.dedup.bam')
 def find_realignment_intervals(foo, intervals, input_bam):
     """Find regions to be re-aligned due to indels"""
     run_cmd("%s -Xmx4g -jar %s \
@@ -491,10 +491,10 @@ def find_realignment_intervals(foo, intervals, input_bam):
 
 
 #@follows(find_realignment_intervals)
-@transform(find_realignment_intervals, suffix(".realign.intervals"), '.realigned.input_bam', r'\1.dedup.input_bam')
+@transform(find_realignment_intervals, suffix(".realign.intervals"), '.realigned.bam', r'\1.dedup.bam')
 def indel_realigner(intervals_file, realigned_bam, input_bam):
-   """Re-aligns regions around indels"""
-   run_cmd("%s -Xmx4g -jar %s \
+    """Re-aligns regions around indels"""
+    run_cmd("%s -Xmx4g -jar %s \
              -T IndelRealigner \
              -I %s \
              -R %s \
