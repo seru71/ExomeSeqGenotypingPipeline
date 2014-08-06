@@ -17,7 +17,6 @@
 import sys
 import os
 import glob
-import string
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
@@ -213,13 +212,13 @@ def run_cmd(cmd_str):
         raise Exception("Failed to run '%s'\n%s%sNon-zero exit status %s" %
                             (cmd_str, stdout_str, stderr_str, process.returncode))
 
-def rename(file,new_file):
+def rename(old_file, new_file):
     """rename file"""
-    os.rename(file,new_file)
+    os.rename(old_file, new_file)
 
-def remove(file):
+def remove(f):
     """remove file"""
-    os.remove(file)
+    os.remove(f)
                             
 def index_bam(bam):
     """Use samtools to create an index for the bam file"""
@@ -399,14 +398,14 @@ if __name__ == '__main__':
 
 def get_sample_ids():
     files = glob.glob(input_bams)
-    return [ os.path.splitext(os.path.basename(file))[0] for file in files ]
+    return [ os.path.splitext(os.path.basename(f))[0] for f in files ]
 
 def generate_parameters():
     files = glob.glob(input_bams)
     parameters = []
-    for file in files:
-        prefix = os.path.splitext(os.path.basename(file))[0]
-        parameters.append([None,prefix + '/' + prefix + '.bam', [prefix,os.path.abspath(file)]])
+    for f in files:
+        prefix = os.path.splitext(os.path.basename(f))[0]
+        parameters.append([None,prefix + '/' + prefix + '.bam', [prefix,os.path.abspath(f)]])
     for job_parameters in parameters:
             yield job_parameters
 
@@ -429,9 +428,9 @@ def link(none, bam, extra):
 
 #@follows(link)
 @transform(link, suffix(".bam"), '.bam.bai')
-def index(input, output):
+def index(bam, output):
     """create bam index"""
-    index_bam(input)
+    index_bam(bam)
 
 
 #
@@ -470,9 +469,9 @@ def remove_dups(bam, output):
 
 #@follows(remove_dups)
 @transform(remove_dups, suffix(".dedup.bam"), '.dedup.bam.bai')
-def index_dups(input, output):
+def index_dups(bam, output):
     """create bam index"""
-    index_bam(input)
+    index_bam(bam)
 
 
 #@follows(index_dups)
@@ -556,16 +555,16 @@ def recalibrate_baseq2(inputs, output_bam):
 
 #@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.quality_score')
-def metric_quality_score_distribution(input,output):
+def metric_quality_score_distribution(input_bam, output):
     """docstring for metrics1"""
-    bam_quality_score_distribution(input, output, output + '.pdf')
+    bam_quality_score_distribution(input_bam, output, output + '.pdf')
 
 
 #@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.metrics')
-def metric_alignment(input,output):
+def metric_alignment(input_bam, output):
     """docstring for metrics1"""
-    bam_alignment_metrics(input, output)
+    bam_alignment_metrics(input_bam, output)
 
 
 #@follows(recalibrate_baseq2)
@@ -596,7 +595,7 @@ def metric_coverage_multisample(bams, output):
     run_cmd(cmd)
 
 @follows(metric_quality_score_distribution, metric_alignment, metric_coverage)
-def gatk_bam_qc:
+def gatk_bam_qc():
     """ Aggregates gatk_bam quality control steps """
     pass
 
@@ -629,7 +628,7 @@ def split_seq(seq, num_pieces):
         yield seq[start:stop]
         start = stop
 
-def multisample_variant_call(files, output):
+def multisample_variant_call(bams, output):
     """Perform multi-sample variant calling using GATK"""
     cmd = "nice %s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx8g -jar %s \
             -T UnifiedGenotyper \
@@ -638,8 +637,8 @@ def multisample_variant_call(files, output):
             -glm BOTH \
             -nt %s \
             --dbsnp %s " % (java, gatk, reference, output, options.jobs, dbsnp)
-    for file in files:
-        cmd = cmd + '-I {} '.format(file)
+    for bam in bams:
+        cmd = cmd + '-I {} '.format(bam)
     #log the results
     cmd = cmd + '&> {}.log'.format(output)
     run_cmd(cmd)
@@ -818,8 +817,8 @@ def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP'):
 
 @follows(find_indel_tranches_for_recalibration)
 @files(['multisample.gatk.vcf','multisample.gatk.snp.model','multisample.gatk.snp.model.tranches'],'multisample.gatk.recalibratedSNPS.rawIndels.vcf')
-def apply_recalibration_filter_snps(input,output):
-    apply_recalibration_to_snps_or_indels(input[0],input[1],input[2],output,mode='SNP')
+def apply_recalibration_filter_snps(inputs,output):
+    apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='SNP')
     # remove(input[0])
     #     remove(input[1])
     #     remove(input[2])
@@ -827,14 +826,14 @@ def apply_recalibration_filter_snps(input,output):
 
 @follows(apply_recalibration_filter_snps)
 @files(['multisample.gatk.recalibratedSNPS.rawIndels.vcf','multisample.gatk.indel.model','multisample.gatk.indel.model.tranches'],'multisample.gatk.preHardFiltering.vcf')
-def apply_recalibration_filter_indels(input,output):
-    apply_recalibration_to_snps_or_indels(input[0],input[1],input[2],output,mode='INDEL')
+def apply_recalibration_filter_indels(inputs,output):
+    apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='INDEL')
 
 
 #@follows(apply_recalibration_filter_indels)
 #@files('multisample.gatk.preHardFiltering.vcf', 'multisample.gatk.markedHardFiltering.vcf')
 @transform(apply_recalibration_filter_indels, suffix('.preHardFiltering.vcf'), '.markedHardFiltering.vcf')
-def filter_variants(input, output):
+def filter_variants(input_vcf, output_vcf):
     """docstring for apply_indel_filter"""
     run_cmd('{java} -Xmx12g -jar {gatk} \
             -T VariantFiltration \
@@ -847,8 +846,8 @@ def filter_variants(input, output):
             -R {reference}'.format(
                 java=java,
                 gatk=gatk,
-                output=output,
-                input=input,
+                output=output_vcf,
+                input=input_vcf,
                 reference=reference
             ))
     # remove(input)
@@ -857,7 +856,7 @@ def filter_variants(input, output):
 #@follows(filter_variants)
 #@files('multisample.gatk.markedHardFiltering.vcf', 'multisample.gatk.analysisReady.vcf')
 @transform(filter_variants, suffix('.markedHardFiltering.vcf'), '.analysisReady.vcf')
-def remove_filtered(input,output):
+def remove_filtered(input_vcf, output_vcf):
     """Remove filtered variants"""
     run_cmd("{java} -Xmx12g -jar {gatk} \
             -T SelectVariants \
@@ -868,8 +867,8 @@ def remove_filtered(input,output):
                 java=java,
                 gatk=gatk,
                 reference=reference,
-                input=input,
-                output=output
+                input=input_vcf,
+                output=output_vcf
             ))
     # remove(input)
 
@@ -891,8 +890,20 @@ def final_calls(vcf, output):
 
 def split_snp_parameters():
     exome_vcf = 'multisample.gatk.analysisReady.exome.vcf'
-    for id in get_sample_ids():
-        yield [exome_vcf, id + '/' + id + '.exome.vcf', id]
+    for s_id in get_sample_ids():
+        yield [exome_vcf, s_id + '/' + s_id + '.exome.vcf', s_id]
+
+def cleanup_files():
+    run_cmd("rm -rf */*.recal_data.csv */*.realign* */*.dedup* */*.log *.log \
+            *.to_filter* multisample.gatk.snp.recal batch* \
+            multisample.gatk.recalibratedSNPS.rawIndels.vcf \
+            multisample.gatk.indel.model.* multisample.gatk.snp.model.* \
+            multisample.gatk.analysisReady.vcf.vcfidx \
+            multisample.gatk.analysisReady.vcf.idx \
+            multisample.gatk.recalibratedSNPS.rawIndels.vcf.idx \
+            ")
+#            multisample.gatk.analysisReady.vcf \
+
 
 @posttask(cleanup_files)
 @follows('final_calls')
@@ -913,17 +924,6 @@ def split_snps(vcf, output, sample):
                 ad_thr=AD_threshold, 
                 dp_thr=DP_threshold))
 
-
-def cleanup_files():
-    run_cmd("rm -rf */*.recal_data.csv */*.realign* */*.dedup* */*.log *.log \
-            *.to_filter* multisample.gatk.snp.recal batch* \
-            multisample.gatk.recalibratedSNPS.rawIndels.vcf \
-            multisample.gatk.indel.model.* multisample.gatk.snp.model.* \
-            multisample.gatk.analysisReady.vcf.vcfidx \
-            multisample.gatk.analysisReady.vcf.idx \
-            multisample.gatk.recalibratedSNPS.rawIndels.vcf.idx \
-            ")
-#            multisample.gatk.analysisReady.vcf \
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 
