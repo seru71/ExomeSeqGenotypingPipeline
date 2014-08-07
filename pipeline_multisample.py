@@ -705,10 +705,12 @@ def call_haplotypes(bam, output_gvcf):
             -I %s \
             -o %s \
             --emitRefConfidence GVCF \
+            --variant_index_type LINEAR \
+            --variant_index_parameter 128000 \
             -minPruning 4 \
             -L %s \
             -nct %s \
-            --dbsnp %s " % (java, gatk, reference, bam, output_gvcf, exome, options.jobs, dbsnp)
+            --dbsnp %s " % (java, gatk, reference, bam, output_gvcf, exome, n_cpus, dbsnp)
 #             -stand_call_conf 50.0 \
 
     #log the results
@@ -720,7 +722,7 @@ def call_haplotypes(bam, output_gvcf):
 def genotype_gvcfs(gvcfs, output):
     """Combine the per-sample GVCF files and genotype""" 
     cmd = "nice %s -Xmx4g -jar %s -R GenotypeGVCFs \
-       -R %s -o %s" % (java, gatk, reference, output)
+            -R %s -o %s -nt %s" % (java, gatk, reference, output, options.jobs)
        
     for gvcf in gvcfs:
         cmd = cmd + " --variant {}".format(gvcf)
@@ -736,7 +738,7 @@ def genotype_gvcfs(gvcfs, output):
 # 
 
 #@follows(call_variants)
-@follows(call_haplotypes)
+@follows(genotype_gvcfs)
 @files('multisample.gatk.vcf', ['multisample.gatk.snp.model','multisample.gatk.snp.model.tranches'])
 def find_snp_tranches_for_recalibration(vcf,outputs):
     """Runs VariantRecalibrator on snps"""
