@@ -696,29 +696,43 @@ def call_variants(infiles, output):
 # Ganotyping using HaplotypeCaller
 #
 
-@merge(recalibrate_baseq2, 'multisample.gatk.gvcf')
-def call_haplotypes(bams, output):
+@transform(recalibrate_baseq2, suffix('.gatk.bam'), '.gvcf')
+def call_haplotypes(bam, output_gvcf):
     """Perform multi-sample variant calling using GATK HaplotypeCaller"""
     cmd = "nice %s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx24g -jar %s \
             -T HaplotypeCaller \
             -R %s \
+            -I %s \
             -o %s \
             --emitRefConfidence GVCF \
             -minPruning 4 \
             -L %s \
             -nct %s \
-            --dbsnp %s " % (java, gatk, reference, output, exome, options.jobs, dbsnp)
+            --dbsnp %s " % (java, gatk, reference, bam, output_gvcf, exome, options.jobs, dbsnp)
 #             -stand_call_conf 50.0 \
-    for bam in bams:
-        cmd = cmd + '-I {} '.format(bam)
+
     #log the results
+    #cmd = cmd + '&> {}.log'.format(output_gvcf)
+    run_cmd(cmd)
+
+
+@merge(call_haplotypes, 'multisample.gatk.vcf')
+def genotype_gvcfs(gvcfs, output):
+    """Combine the per-sample GVCF files and genotype""" 
+    cmd = "nice %s -Xmx4g -jar %s -R GenotypeGVCFs \
+       -R %s -o %s" % (java, gatk, reference, output)
+       
+    for gvcf in gvcfs:
+        cmd = cmd + " --variant {}".format(gvcf)
+    
     cmd = cmd + '&> {}.log'.format(output)
     run_cmd(cmd)
 
 
+
 #
 #
-# Variant recalibration and filtering
+# Variant recalisbration and filtering
 # 
 
 #@follows(call_variants)
