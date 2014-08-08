@@ -709,8 +709,8 @@ def call_haplotypes(bam, output_gvcf):
             --variant_index_parameter 128000 \
             -minPruning 4 \
             -L %s \
-            -nct %s \
-            --dbsnp %s " % (java, gatk, reference, bam, output_gvcf, exome, n_cpus, dbsnp)
+            --dbsnp %s " % (java, gatk, reference, bam, output_gvcf, exome, dbsnp)
+#             -nct %s \
 #             -stand_call_conf 50.0 \
 
     #log the results

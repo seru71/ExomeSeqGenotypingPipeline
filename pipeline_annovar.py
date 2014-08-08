@@ -600,7 +600,7 @@ def produce_variant_stats_table(infiles, table_file):
     out = open(table_file,'w')    
     out.write('sample\traw_exonic\trare_exonic\traw_synonymous\trare_synonymous\n')
     for i in range(0,sample_no):
-        out.write(os.path.basename(raw_variant_files[i][0]).split('.')[1])
+        out.write(os.path.basename(raw_variant_files[i][0]).split('.')[0])
         for fname in [raw_variant_files[i][0], rare_variant_files[i][2]]: # exonic variant stats of raw variants and rare variants
             f=open(fname)        
             for l in f.xreadlines():
