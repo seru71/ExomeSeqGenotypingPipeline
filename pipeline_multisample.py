@@ -721,7 +721,7 @@ def call_haplotypes(bam, output_gvcf):
 @merge(call_haplotypes, 'multisample.gatk.vcf')
 def genotype_gvcfs(gvcfs, output):
     """Combine the per-sample GVCF files and genotype""" 
-    cmd = "nice %s -Xmx4g -jar %s -R GenotypeGVCFs \
+    cmd = "nice %s -Xmx4g -jar %s -T GenotypeGVCFs \
             -R %s -o %s -nt %s" % (java, gatk, reference, output, options.jobs)
        
     for gvcf in gvcfs:
