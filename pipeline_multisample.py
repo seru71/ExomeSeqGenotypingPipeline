@@ -750,7 +750,7 @@ def find_snp_tranches_for_recalibration(vcf,outputs):
             -resource:omni,known=false,training=true,truth=true,prior=12.0 {omni} \
             -resource:1000G,known=false,training=true,truth=false,prior=10.0 {snps_1kg} \
             -resource:dbsnp,known=true,training=false,truth=false,prior=2.0 {dbsnp} \
-            -an QD -an MQ -an MQRankSum -an ReadPosRankSum -an FS -an HaplotypeScore \
+            -an QD -an MQ -an MQRankSum -an ReadPosRankSum -an FS -an DP \
             -mode SNP \
             -recalFile {output} \
             -tranchesFile {tranches} \
@@ -785,7 +785,7 @@ def find_indel_tranches_for_recalibration(vcf,outputs):
             --maxGaussians 4 \
             -resource:mills,known=false,training=true,truth=true,prior=12.0 {mills} \
             -resource:dbsnp,known=true,training=false,truth=false,prior=2.0 {dbsnp} \
-            -an QD -an FS -an ReadPosRankSum -an MQRankSum \
+            -an QD -an DP -an FS -an ReadPosRankSum -an MQRankSum \
             -mode INDEL \
             -recalFile {output} \
             -tranchesFile {tranches} \
