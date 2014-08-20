@@ -437,21 +437,21 @@ from utility_functions import quote_aware_split, parenthesis_aware_split
 
 @transform(produce_variant_annotation_table, formatter(), '{path[1]}/{basename[1]}.with_omim.csv')
 def include_omim_phenotype_annotation(inputs, output_table, gene_column=7, omim_column=15, delim=','):
-        """ include OMIM phenotype into the annotation table """
-        table_in = open(inputs[1],'r')
-        table_out = open(output_table,'w')
+    """ include OMIM phenotype into the annotation table """
+    table_in = open(inputs[1],'r')
+    table_out = open(output_table,'w')
 
-        # header
-        header_in=quote_aware_split(table_in.readline(), delim)
-        if omim_column <= 0:        
-                        omim_column=len(header_in)+1
-        header_out = header_in[:omim_column-1] + ['omim_phenotype'] + header_in[omim_column-1:]
-        table_out.write(delim.join(header_out))
+    # header
+    header_in=quote_aware_split(table_in.readline(), delim)
+    if omim_column <= 0:        
+        omim_column=len(header_in)+1
+    header_out = header_in[:omim_column-1] + ['omim_phenotype'] + header_in[omim_column-1:]
+    table_out.write(delim.join(header_out))
 
-        # the rest of the table
-        for l in table_in.xreadlines():
-                lsplit = quote_aware_split(l,delim)
-                gene = lsplit[gene_column-1].strip('"')
+    # the rest of the table
+    for l in table_in.xreadlines():
+        lsplit = quote_aware_split(l,delim)
+        gene = lsplit[gene_column-1].strip('"')
 
         # the gene record can be a list (e.g. overlapping genes), so it needs to be split
         genes = [gene]
@@ -467,9 +467,9 @@ def include_omim_phenotype_annotation(inputs, output_table, gene_column=7, omim_
             
             # put the variant record in the map
             try:
-                            omim_phenotype = omim_gene_phenotype_map[gene]
+                omim_phenotype = omim_gene_phenotype_map[gene]
             except KeyError:
-                             omim_phenotype = 'NA'
+                omim_phenotype = 'NA'
 
         table_out.write(delim.join(lsplit[:omim_column-1] + ['"'+omim_phenotype+'"'] + lsplit[omim_column-1:]) )
 
