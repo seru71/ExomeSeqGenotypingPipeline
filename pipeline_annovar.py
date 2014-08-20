@@ -474,8 +474,8 @@ def include_omim_phenotype_annotation(inputs, output_table, gene_column=7, omim_
 
         table_out.write(delim.join(lsplit[:omim_column-1] + ['"'+omim_phenotype+'"'] + lsplit[omim_column-1:]) )
 
-        table_in.close()
-        table_out.close()
+    table_in.close()
+    table_out.close()
 
 @transform(include_omim_phenotype_annotation, formatter(), '{path[0]}/{basename[0]}.recessive.csv')
 def extract_recessive_disorder_candidates(input, output, gene_column_name='Gene.refGene', zygozity_column_name='Otherinfo', delim=','):
