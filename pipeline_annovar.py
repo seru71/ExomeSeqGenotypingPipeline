@@ -550,7 +550,7 @@ def count_hetz_and_homz_per_chr(infiles, table_files):
     hetz.write('sample\t'+string.join(chromosomes,'\t')+'\n')
     homz.write('sample\t'+string.join(chromosomes,'\t')+'\n')
     for fname in infiles:
-        sample_id=os.path.basename(fname).split('.')[1]
+        sample_id=os.path.basename(fname).split('.')[0]
         hetz.write(sample_id)
         homz.write(sample_id)
 
