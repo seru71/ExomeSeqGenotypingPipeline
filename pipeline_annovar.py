@@ -144,7 +144,10 @@ if __name__ == '__main__':
     config = ConfigParser.ConfigParser()
     config.read(options.pipeline_settings)
     # inputs 
-    input_bams = config.get('Inputs','input-bams')
+    input_vcfs = config.get('Inputs','input-vcfs')
+    if input_vcfs == None:
+        prefixes = [ os.path.splitext(os.path.basename(f))[0] for f in config.get('Inputs','input-bams') ]
+        input_vcfs = [ os.path.join(prefix, prefix+'.exome.vcf') for prefix in prefixes ] 
 
     # reference dbs
     annovar_human_db = config.get('Resources','annovar-humandb-dir')
@@ -280,11 +283,10 @@ def run_cmd(cmd_str):
 
 
 def generate_parameters():
-    bams = glob.glob(input_bams)
-    for f in bams:
+    vcfs = glob.glob(input_vcfs)
+    for f in vcfs:
         prefix = os.path.splitext(os.path.basename(f))[0]
-        yield [ os.path.join(prefix, prefix+'.exome.vcf'), 
-                os.path.join('annotated-with-annovar', prefix+'.avinput')]
+        yield [f, os.path.join('annotated-with-annovar', prefix+'.avinput')]
 
 
 #@transform(vcf_files, formatter('.*/(?P<SAMPLE_ID>[^/]+).exome.vcf'),
