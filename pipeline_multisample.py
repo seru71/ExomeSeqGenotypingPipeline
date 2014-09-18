@@ -170,6 +170,7 @@ if __name__ == '__main__':
     java = config.get('Tools','java-binary')
     picard = config.get('Tools','picard-tools-path')
     gatk = config.get('Tools','gatk-jar')
+    vcftools = config.get('Tools','vcftools')
     # other
     n_cpus = config.getint('Other','n-cpus')
 
@@ -895,12 +896,12 @@ def final_calls(vcf, output):
     """ Produce the final variant calls in the exome regions """
     output = output[:-10]
     # apply filters to the vcf file to limit calling to exome region    
-    run_cmd("vcftools --vcf %s \
+    run_cmd("%s --vcf %s \
              --out %s \
              --recode \
              --bed %s \
-             --keep-INFO-all "
-            % (vcf, output, exome))
+             --keep-INFO-all"
+            % (vcftools, vcf, output, exome))
     rename('multisample.gatk.analysisReady.recode.vcf','multisample.gatk.analysisReady.exome.vcf')
 
 
