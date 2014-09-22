@@ -165,6 +165,7 @@ if __name__ == '__main__':
     indels_1kg = config.get('Resources','1000genomes-indels-vcf')
     mills = config.get('Resources','mills-indels-vcf')
     capture = config.get('Resources','capture-regions-bed')
+    capture_qualimap = config.get('Resources','capture-regions-bed-for-qualimap')
     exome = config.get('Resources', 'exome-regions-bed')
     # tools 
     java = config.get('Tools','java-binary')
@@ -279,12 +280,10 @@ def qualimap_bam(input_bam, output_dir):
              -c -outformat PDF \
              -gff {target} \
              -gd HUMAN -os \
-             -nt {threads} \
-             -outdir {dir}".format(
+             -outdir {dir} &> {dir}/qualimap.err".format(
                 qualimap=qualimap,
                 bam=input_bam,
-                target=capture,
-                threads=n_cpus,
+                target=capture_qualimap,
                 dir=output_dir))
 
     
@@ -477,7 +476,7 @@ def qc_raw_bam_coverage_metrics(input_bam, output, output_format):
     bam_coverage_metrics(input_bam, output_format)
 
 @follows(index)
-@transform(link, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{path[0]}/qc/qualimap/{SAMPLE_ID[0]}')
+@transform(link, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{subpath[0][1]}/qc/qualimap/{SAMPLE_ID[0]}')
 def qc_raw_bam_qualimap_report(input_bam, output_dir):
     qualimap_bam(input_bam, output_dir)
 
