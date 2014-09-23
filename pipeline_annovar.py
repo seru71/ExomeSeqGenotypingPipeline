@@ -304,25 +304,24 @@ def prepare_annovar_inputs(vcf, output):
         ".format(vcf=vcf, out=output))
     
 
-def annotate_variants_with_functional_change(input_file, output_prefix):
-    run_cmd("annotate_variation.pl -buildver hg19 -outfile {outfile_prefix} {input_file} {annodb}".format(
-        outfile_prefix=output_prefix, 
-        input_file=input_file, 
+
+#
+# Filtering
+#
+
+@transform(prepare_annovar_inputs, suffix('.avinput'),
+                                      ['.avinput.hg19_EUR.sites.2012_04_filtered',
+                                       '.avinput.hg19_EUR.sites.2012_04_dropped'])  
+def filter_common_1000genomes(input, outputs):
+    """ filter common 1000 genomes variants """
+    filtered = input
+    run_cmd("annotate_variation.pl -build hg19 -filter -dbtype {eur1kg} \
+        -maf {maf} -outfile {output_prefix} {input_file} {annodb}".format(
+        eur1kg=annovar_1000genomes_eur,
+        maf=0.01, 
+        output_prefix=filtered,
+        input_file=filtered, 
         annodb=annovar_human_db))
-
-
-@transform(prepare_annovar_inputs, suffix('.avinput'), ['.avinput.variant_function.stats','.avinput.exonic_variant_function.stats'])
-def annotate_function_of_raw_variants(input, outputs):
-    """ annotate functional change in raw variants """
-    annotate_variants_with_functional_change(input_file=input, output_prefix=input)
-    # calculate stats on files created by annovar - output files without ".stats" suffix
-    run_cmd("cut -f 1 {f} | sort | uniq -c > {f}.stats".format(f=outputs[0][:-len('.stats')]))
-    run_cmd("cut -f 2 {f} | sort | uniq -c > {f}.stats".format(f=outputs[1][:-len('.stats')]))
-    # remove the annovar files
-    os.remove(outputs[0][:-len('.stats')])
-    os.remove(outputs[1][:-len('.stats')])
-
-
 
 
 
@@ -339,39 +338,39 @@ def filter_variants_from_custom_db(input, output_paths, db_path, db_name):
         os.rename(output_file.replace(db_name,'hg19_generic'), output_file)
     
 
-@transform(prepare_annovar_inputs, suffix('.avinput'), 
-                                        ['.avinput.common_inhouse_filtered', 
-                                         '.avinput.common_inhouse_dropped'])
-def filter_common_inhouse(input, outputs):
-    filter_variants_from_custom_db(input, outputs, annovar_common_inhouse_db, db_name='common_inhouse')
+@transform(filter_common_1000genomes, suffix('.hg19_EUR.sites.2012_04_filtered'), 
+                                        ['.hg19_EUR.sites.2012_04_filtered.common_inhouse_filtered', 
+                                         '.hg19_EUR.sites.2012_04_filtered.common_inhouse_dropped'])
+def filter_common_inhouse(inputs, outputs):
+    # take only the filtered file, leave dropped
+    filter_variants_from_custom_db(inputs[0], outputs, annovar_common_inhouse_db, db_name='common_inhouse')
+    
     
 @transform(filter_common_inhouse, suffix('.common_inhouse_filtered'), 
                                         ['.common_inhouse_filtered.common_miseq_filtered', 
                                          '.common_inhouse_filtered.common_miseq_dropped'])
 def filter_common_miseq(inputs, outputs):
+    # take only the filtered file, leave dropped
     filter_variants_from_custom_db(inputs[0], outputs, annovar_common_miseq_db, db_name='common_miseq')
     
     
-@transform(filter_common_miseq, suffix('.common_miseq_filtered'),
-                                      ['.common_miseq_filtered.hg19_EUR.sites.2012_04_filtered',
-                                       '.common_miseq_filtered.hg19_EUR.sites.2012_04_dropped'])  
-def filter_common_1000genomes(inputs, outputs):
-    """ filter common 1000 genomes variants """
-    filtered = inputs[0]                      # take only the filtered file, leave dropped
-    run_cmd("annotate_variation.pl -build hg19 -filter -dbtype {eur1kg} \
-        -maf {maf} -outfile {output_prefix} {input_file} {annodb}".format(
-        eur1kg=annovar_1000genomes_eur,
-        maf=0.01, 
-        output_prefix=filtered,
-        input_file=filtered, 
-        annodb=annovar_human_db))
+#
+# Annotation
+#    
+    
+    
+def annotate_variants_with_functional_change(input_file, output_prefix):
+    run_cmd("annotate_variation.pl -buildver hg19 -outfile {outfile_prefix} {input_file} {annodb}".format(
+        outfile_prefix=output_prefix, 
+        input_file=input_file, 
+        annodb=annovar_human_db))    
+    
 
-
-@transform(filter_common_1000genomes, suffix('.hg19_EUR.sites.2012_04_filtered'), 
-                                           ['.hg19_EUR.sites.2012_04_filtered.variant_function',
-                                         '.hg19_EUR.sites.2012_04_filtered.exonic_variant_function',
-                                         '.hg19_EUR.sites.2012_04_filtered.variant_function.stats',
-                                         '.hg19_EUR.sites.2012_04_filtered.exonic_variant_function.stats'])
+@transform(filter_common_miseq, suffix('.common_miseq_filtered'), 
+                                        ['.common_miseq_filtered.variant_function',
+                                         '.common_miseq_filtered.exonic_variant_function',
+                                         '.common_miseq_filtered.variant_function.stats',
+                                         '.common_miseq_filtered.exonic_variant_function.stats'])
 def annotate_function_of_rare_variants(inputs, outputs):
     """ annotate functional change in rare variants """
     filtered = inputs[0]                         # use only the filtered input file, leave dropped
@@ -382,7 +381,7 @@ def annotate_function_of_rare_variants(inputs, outputs):
 
 
 @transform(annotate_function_of_rare_variants, 
-           formatter(".*/(?P<SAMPLE_ID>[^/]+).avinput.common_inhouse_filtered.common_miseq_filtered.hg19_EUR.sites.2012_04_filtered.variant_function", None, None, None),
+           formatter(".*/(?P<SAMPLE_ID>[^/]+).avinput.hg19_EUR.sites.2012_04_filtered.common_inhouse_filtered.common_miseq_filtered.variant_function", None, None, None),
            ['{path[0]}/annotated-tables/{SAMPLE_ID[0]}.rare_coding_and_splicing.avinput', 
             '{path[0]}/annotated-tables/{SAMPLE_ID[0]}.rare_coding_and_splicing.avinput.hg19_multianno.csv'])
 def produce_variant_annotation_table(inputs, outputs):
@@ -611,6 +610,19 @@ def count_hetz_and_homz_per_chr(infiles, table_files):
 
     hetz.close()
     homz.close()
+
+
+@transform(prepare_annovar_inputs, suffix('.avinput'), ['.avinput.variant_function.stats','.avinput.exonic_variant_function.stats'])
+def annotate_function_of_raw_variants(input, outputs):
+    """ annotate functional change in raw variants """
+    annotate_variants_with_functional_change(input_file=input, output_prefix=input)
+    # calculate stats on files created by annovar - output files without ".stats" suffix
+    run_cmd("cut -f 1 {f} | sort | uniq -c > {f}.stats".format(f=outputs[0][:-len('.stats')]))
+    run_cmd("cut -f 2 {f} | sort | uniq -c > {f}.stats".format(f=outputs[1][:-len('.stats')]))
+    # remove the annovar files
+    os.remove(outputs[0][:-len('.stats')])
+    os.remove(outputs[1][:-len('.stats')])
+
 
 @merge([annotate_function_of_raw_variants, annotate_function_of_rare_variants], 'all_samples_exonic_variant_stats.tsv')
 def produce_variant_stats_table(infiles, table_file):
