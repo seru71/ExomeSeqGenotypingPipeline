@@ -155,9 +155,10 @@ if __name__ == '__main__':
     # reference dbs
     annovar_human_db = config.get('Resources','annovar-humandb-dir')
     annovar_1000genomes_eur = config.get('Resources','annovar-1000genomes-eur')
-    annovar_inhouse_db = config.get('Resources','annovar-inhouse-db')
+    annovar_common_inhouse_db = config.get('Resources','annovar-common-inhouse-db')
+    annovar_common_miseq_db = config.get('Resources','annovar-common-miseq-db')
     omim_gene_phenotype_map_file = config.get('Resources','omim_gene_phenotype_map')
-
+	
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
@@ -322,32 +323,45 @@ def annotate_function_of_raw_variants(input, outputs):
     os.remove(outputs[1][:-len('.stats')])
 
 
-@transform(prepare_annovar_inputs, suffix('.avinput'), 
-                                        ['.avinput.common_inhouse_filtered', 
-                                         '.avinput.common_inhouse_dropped'])
-def filter_common_inhouse(input, outputs):
-    """ filter variants found in the inhouse database. OBS! output specifies the filename after rename """    
-    run_cmd("annotate_variation.pl -build hg19 -filter -dbtype generic -genericdbfile {inhouse} \
+
+
+
+def filter_variants_from_custom_db(input, output_paths, db_path, db_name):
+    """ filter variants specified in a csutom, annovar formated file. OBS! output specifies the filename after rename """    
+    run_cmd("annotate_variation.pl -build hg19 -filter -dbtype generic -genericdbfile {db} \
         -outfile {outfile} {input} {annodb}".format(
-        inhouse=annovar_inhouse_db, 
+        db=db_path, 
         outfile=input, 
         input=input, 
         annodb=annovar_human_db))
 
-    for output_file in outputs: 
-        os.rename(output_file.replace('common_inhouse','hg19_generic'), output_file)
-
+    for output_file in output_paths: 
+        os.rename(output_file.replace(db_name,'hg19_generic'), output_file)
     
-@transform(filter_common_inhouse, suffix('.common_inhouse_filtered'),
-                                        ['.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered',
-                                         '.common_inhouse_filtered.hg19_EUR.sites.2012_04_dropped'])
+
+@transform(prepare_annovar_inputs, suffix('.avinput'), 
+                                        ['.avinput.common_inhouse_filtered', 
+                                         '.avinput.common_inhouse_dropped'])
+def filter_common_inhouse(input, outputs):
+    filter_variants_from_custom_db(input, outputs, annovar_common_inhouse_db, db_name='common_inhouse')
+    
+@transform(filter_common_inhouse, suffix('.common_inhouse_filtered'), 
+                                        ['.common_inhouse_filtered.common_miseq_filtered', 
+                                         '.common_inhouse_filtered.common_miseq_dropped'])
+def filter_common_miseq(inputs, outputs):
+    filter_variants_from_custom_db(inputs[0], outputs, annovar_common_miseq_db, db_name='common_miseq')
+    
+    
+@transform(filter_common_miseq, suffix('.common_miseq_filtered'),
+                                      ['.common_miseq_filtered.hg19_EUR.sites.2012_04_filtered',
+                                       '.common_miseq_filtered.hg19_EUR.sites.2012_04_dropped'])  
 def filter_common_1000genomes(inputs, outputs):
     """ filter common 1000 genomes variants """
     filtered = inputs[0]                      # take only the filtered file, leave dropped
     run_cmd("annotate_variation.pl -build hg19 -filter -dbtype {eur1kg} \
         -maf {maf} -outfile {output_prefix} {input_file} {annodb}".format(
         eur1kg=annovar_1000genomes_eur,
-        maf=0.005, 
+        maf=0.01, 
         output_prefix=filtered,
         input_file=filtered, 
         annodb=annovar_human_db))
@@ -368,7 +382,7 @@ def annotate_function_of_rare_variants(inputs, outputs):
 
 
 @transform(annotate_function_of_rare_variants, 
-           formatter(".*/(?P<SAMPLE_ID>[^/]+).avinput.common_inhouse_filtered.hg19_EUR.sites.2012_04_filtered.variant_function", None, None, None),
+           formatter(".*/(?P<SAMPLE_ID>[^/]+).avinput.common_inhouse_filtered.common_miseq_filtered.hg19_EUR.sites.2012_04_filtered.variant_function", None, None, None),
            ['{path[0]}/annotated-tables/{SAMPLE_ID[0]}.rare_coding_and_splicing.avinput', 
             '{path[0]}/annotated-tables/{SAMPLE_ID[0]}.rare_coding_and_splicing.avinput.hg19_multianno.csv'])
 def produce_variant_annotation_table(inputs, outputs):
@@ -389,14 +403,18 @@ def produce_variant_annotation_table(inputs, outputs):
     f = open(rare_ex_var_fun)
     for l in f.xreadlines():
         lsplit=l.split('\t')
-        if lsplit[1] != 'synonymous SNV':
-            f_out.write(string.join(lsplit[3:],'\t'))
+#
+#	dont filter out any variants
+#        if lsplit[1] != 'synonymous SNV':
+        f_out.write(string.join(lsplit[3:],'\t'))
     f.close()
     f = open(rare_var_fun)
     for l in f.xreadlines():
         lsplit=l.split('\t')
-        if lsplit[0] == 'splicing':
-            f_out.write(string.join(lsplit[2:],'\t'))
+#
+#	dont filter any variants
+#        if lsplit[0] == 'splicing':
+        f_out.write(string.join(lsplit[2:],'\t'))
     f.close()
     f_out.close()
     
