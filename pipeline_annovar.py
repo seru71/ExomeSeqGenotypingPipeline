@@ -616,21 +616,29 @@ def count_hetz_and_homz_per_chr(infiles, table_files):
 @merge([annotate_function_of_raw_variants, annotate_function_of_rare_variants], 'all_samples_exonic_variant_stats.tsv')
 def produce_variant_stats_table(infiles, table_file):
     """ produce a table of per-sample counts of different type of exonic variants """
+
+    var_types=['splicing','UTR3','UTR5','intronic','intergenic','exonic']
+    
     # split the input files per task
     sample_no = len(infiles)/2
     raw_variant_files = infiles[0:sample_no]
     rare_variant_files = infiles[sample_no:]
 
-    out = open(table_file,'w')    
-    out.write('sample\traw_exonic\trare_exonic\traw_synonymous\trare_synonymous\n')
+    out = open(table_file,'w')
+    
+    header = ['sample'] + zip(['raw_'+t for t in var_types], ['rare_'+t for t in var_types]) + ['raw_synonymous','rare_synonymous']
+    out.write('\t'.join(header)+'\n')
     for i in range(0,sample_no):
         out.write(os.path.basename(raw_variant_files[i][0]).split('.')[0])
         for fname in [raw_variant_files[i][0], rare_variant_files[i][2]]: # exonic variant stats of raw variants and rare variants
+            counts = dict.fromkeys(var_types,0)
             f=open(fname)        
             for l in f.xreadlines():
-                if l.find("exonic")>0:
-                    out.write('\t'+l.split()[0])
-                    break
+                for var_type in var_types:
+                    if l.find(' '+var_type+'\n')>0:
+                        counts[var_type] = l.split()[0]
+                        break
+            out.write('\t'+'\t'.join([counts[t] for t in var_types]))
             f.close()
         for fname in [raw_variant_files[i][1], rare_variant_files[i][3]]: # synonymous variants stats of raw and rare variants
             f=open(fname)
