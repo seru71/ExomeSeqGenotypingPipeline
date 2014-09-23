@@ -389,25 +389,24 @@ def produce_variant_annotation_table(inputs, outputs):
     """ produce a table of various annotations per variant """
         
     dir = 'annotated-with-annovar/annotated-tables'
-    try:
-               os.mkdir(dir)
-    except (OSError):
-               pass # dir exists
+    try: os.mkdir(dir)
+    except (OSError): pass # dir exists
     
     avinput = outputs[0]
     rare_var_fun = inputs[0]
-    rare_ex_var_fun = inputs[1]
+# we take in all variants here     
+#    rare_ex_var_fun = inputs[1]
     
     # create input file for the table_annotation script
     f_out = open(avinput,'w')
-    f = open(rare_ex_var_fun)
-    for l in f.xreadlines():
-        lsplit=l.split('\t')
+#    f = open(rare_ex_var_fun)
+#    for l in f.xreadlines():
+#        lsplit=l.split('\t')
 #
 #	dont filter out any variants
 #        if lsplit[1] != 'synonymous SNV':
-        f_out.write(string.join(lsplit[3:],'\t'))
-    f.close()
+#        f_out.write(string.join(lsplit[3:],'\t'))
+#    f.close()
     f = open(rare_var_fun)
     for l in f.xreadlines():
         lsplit=l.split('\t')
