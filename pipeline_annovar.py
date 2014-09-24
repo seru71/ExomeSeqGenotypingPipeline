@@ -146,7 +146,7 @@ if __name__ == '__main__':
     # inputs 
     try: input_vcfs = config.get('Inputs','input-vcfs')
     except (ConfigParser.NoOptionError):
-	sys.stderr.write('No input-vcfs setting in config file. Recreating vcf files path from bam files: ')
+        sys.stderr.write('No input-vcfs setting in config file. Recreating vcf files path from bam files: ')
         prefix = os.path.splitext(os.path.basename(config.get('Inputs','input-bams')))[0]
         input_vcfs = os.path.join(prefix, prefix+'.exome.vcf') 
         sys.stderr.write(input_vcfs+'\n')
@@ -158,7 +158,7 @@ if __name__ == '__main__':
     annovar_common_inhouse_db = config.get('Resources','annovar-common-inhouse-db')
     annovar_common_miseq_db = config.get('Resources','annovar-common-miseq-db')
     omim_gene_phenotype_map_file = config.get('Resources','omim_gene_phenotype_map')
-	
+
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
@@ -289,7 +289,8 @@ def run_cmd(cmd_str):
 def generate_parameters():
     vcfs = glob.glob(input_vcfs)
     for f in vcfs:
-        prefix = os.path.splitext(os.path.basename(f))[0]
+        # get the sample id as prefix
+        prefix = os.path.basename(f)[0:-len('.exome.vcf')]
         yield [f, os.path.join('annotated-with-annovar', prefix+'.avinput')]
 
 
