@@ -165,11 +165,14 @@ if __name__ == '__main__':
     indels_1kg = config.get('Resources','1000genomes-indels-vcf')
     mills = config.get('Resources','mills-indels-vcf')
     capture = config.get('Resources','capture-regions-bed')
+    capture_qualimap = config.get('Resources','capture-regions-bed-for-qualimap')
     exome = config.get('Resources', 'exome-regions-bed')
     # tools 
     java = config.get('Tools','java-binary')
     picard = config.get('Tools','picard-tools-path')
+    qualimap = config.get('Tools','qualimap')
     gatk = config.get('Tools','gatk-jar')
+    vcftools = config.get('Tools','vcftools')
     # other
     n_cpus = config.getint('Other','n-cpus')
 
@@ -267,6 +270,23 @@ def bam_coverage_metrics(input_bam, output):
                 capture=capture
             ))
 
+def qualimap_bam(input_bam, output_dir):
+    """ Generates Qualimap bam QC report """
+    # create necessary folders first
+    if not os.path.exists('qc'): os.mkdir('qc')
+    if not os.path.exists('qc/qualimap/'): os.mkdir('qc/qualimap')
+    if not os.path.exists(output_dir): os.mkdir(output_dir)
+    run_cmd("{qualimap} bamqc -bam {bam} \
+             -c -outformat PDF \
+             -gff {target} \
+             -gd HUMAN -os \
+             -outdir {dir} &> {dir}/qualimap.err".format(
+                qualimap=qualimap,
+                bam=input_bam,
+                target=capture_qualimap,
+                dir=output_dir))
+
+    
     
 #
 #
@@ -435,6 +455,43 @@ def index(bam, output):
 
 #
 #
+# QC the raw bam files
+#
+
+@follows(index)
+@transform(link, suffix(".bam"), '.quality_score')
+def qc_raw_bam_quality_score_distribution(input_bam, output):
+    """docstring for metrics1"""
+    bam_quality_score_distribution(input_bam, output, output + '.pdf')
+
+@follows(index)
+@transform(link, suffix(".bam"), '.metrics')
+def qc_raw_bam_alignment_metrics(input_bam, output):
+    """docstring for metrics1"""
+    bam_alignment_metrics(input_bam, output)
+    
+@follows(index)
+@transform(link, suffix(".bam"), '.coverage.sample_summary', r'\1.coverage')
+def qc_raw_bam_coverage_metrics(input_bam, output, output_format):
+    bam_coverage_metrics(input_bam, output_format)
+
+@follows(index)
+@transform(link, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{subpath[0][1]}/qc/qualimap/{SAMPLE_ID[0]}')
+def qc_raw_bam_qualimap_report(input_bam, output_dir):
+    qualimap_bam(input_bam, output_dir)
+
+#@follows(qc_raw_bam_quality_score_distribution, qc_raw_bam_alignment_metrics, qc_raw_bam_coverage_metrics)
+@follows(qc_raw_bam_coverage_metrics, qc_raw_bam_qualimap_report)
+def raw_bam_qc():
+    """ Aggregates raw bam quality control steps """
+    pass
+
+
+
+
+
+#
+#
 # Prepare the bam files for variant calling
 #
 
@@ -458,7 +515,7 @@ def dup_mark_picard(bam,output):
             % (java, picard, bam, output, bam))
 
 
-#@follows(index)
+@follows(index)
 @transform(link, suffix(".bam"), '.dedup.bam')
 def remove_dups(bam, output):
     """Use samtools for dupremoval"""
@@ -550,51 +607,33 @@ def recalibrate_baseq2(inputs, output_bam):
 
 #
 #
-# BAM-level QC measurements
+# gatk.bam-level QC measurements
 #
 
 #@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.quality_score')
-def metric_quality_score_distribution(input_bam, output):
+def qc_gatk_bam_quality_score_distribution(input_bam, output):
     """docstring for metrics1"""
     bam_quality_score_distribution(input_bam, output, output + '.pdf')
 
-
 #@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.metrics')
-def metric_alignment(input_bam, output):
+def qc_gatk_bam_alignment_metrics(input_bam, output):
     """docstring for metrics1"""
     bam_alignment_metrics(input_bam, output)
 
-
 #@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.coverage.sample_summary', r'\1.coverage')
-def metric_coverage(input_bam, output, output_format):
+def qc_gatk_bam_coverage_metrics(input_bam, output, output_format):
     bam_coverage_metrics(input_bam, output_format)
 
+@transform(recalibrate_baseq2, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{path[0]}/qc/qualimap/{SAMPLE_ID[0]}')
+def qc_gatk_bam_qualimap_report(input_bam, output_dir):
+    qualimap_bam(input_bam, output_dir)
 
-# long running, memory demanding and not very useful
-@merge(recalibrate_baseq2, 'multisample.coverage')
-def metric_coverage_multisample(bams, output):
-    bam_coverage_multisample_statistics(bams, output)
-    cmd = "{java} -Xmx32g -jar {gatk} \
-            -R {reference} \
-            -T DepthOfCoverage \
-            -o {output} \
-            -L {capture} \
-            -ct 8 -ct 20 -ct 30 \
-            --omitDepthOutputAtEachBase --omitLocusTable \
-        ".format(java=java, gatk=gatk,
-                reference=reference,
-                output=output,
-                capture=capture)
 
-    for bam in bams:
-        cmd += " -I {}".format(bam)
-
-    run_cmd(cmd)
-
-@follows(metric_quality_score_distribution, metric_alignment, metric_coverage)
+#@follows(qc_gatk_bam_quality_score_distribution, qc_gatk_bam_alignment_metrics, qc_gatk_bam_coverage_metrics, qc_gatk_bam_qualimap_report)
+@follows(qc_gatk_bam_coverage_metrics, qc_gatk_bam_qualimap_report)
 def gatk_bam_qc():
     """ Aggregates gatk_bam quality control steps """
     pass
@@ -698,7 +737,7 @@ def call_variants(infiles, output):
 
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.gvcf')
 def call_haplotypes(bam, output_gvcf):
-    """Perform multi-sample variant calling using GATK HaplotypeCaller"""
+    """Perform variant calling using GATK HaplotypeCaller"""
     cmd = "nice %s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx24g -jar %s \
             -T HaplotypeCaller \
             -R %s \
@@ -895,12 +934,12 @@ def final_calls(vcf, output):
     """ Produce the final variant calls in the exome regions """
     output = output[:-10]
     # apply filters to the vcf file to limit calling to exome region    
-    run_cmd("vcftools --vcf %s \
+    run_cmd("%s --vcf %s \
              --out %s \
              --recode \
              --bed %s \
-             --keep-INFO-all "
-            % (vcf, output, exome))
+             --keep-INFO-all"
+            % (vcftools, vcf, output, exome))
     rename('multisample.gatk.analysisReady.recode.vcf','multisample.gatk.analysisReady.exome.vcf')
 
 

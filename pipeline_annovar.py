@@ -144,10 +144,13 @@ if __name__ == '__main__':
     config = ConfigParser.ConfigParser()
     config.read(options.pipeline_settings)
     # inputs 
-    input_vcfs = config.get('Inputs','input-vcfs')
-    if input_vcfs == None:
-        prefixes = [ os.path.splitext(os.path.basename(f))[0] for f in config.get('Inputs','input-bams') ]
-        input_vcfs = [ os.path.join(prefix, prefix+'.exome.vcf') for prefix in prefixes ] 
+    try: input_vcfs = config.get('Inputs','input-vcfs')
+    except (ConfigParser.NoOptionError):
+	sys.stderr.write('No input-vcfs setting in config file. Recreating vcf files path from bam files: ')
+        prefix = os.path.splitext(os.path.basename(config.get('Inputs','input-bams')))[0]
+        input_vcfs = os.path.join(prefix, prefix+'.exome.vcf') 
+        sys.stderr.write(input_vcfs+'\n')
+
 
     # reference dbs
     annovar_human_db = config.get('Resources','annovar-humandb-dir')
