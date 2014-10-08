@@ -156,7 +156,8 @@ if __name__ == '__main__':
     annovar_human_db = config.get('Resources','annovar-humandb-dir')
     annovar_1000genomes_eur = config.get('Resources','annovar-1000genomes-eur')
     annovar_common_inhouse_db = config.get('Resources','annovar-common-inhouse-db')
-    annovar_common_miseq_db = config.get('Resources','annovar-common-miseq-db')
+    annovar_common_miseq5_db = config.get('Resources','annovar-common-miseq5-db')
+    annovar_common_miseq30_db = config.get('Resources','annovar-common-miseq30-db')
     omim_gene_phenotype_map_file = config.get('Resources','omim_gene_phenotype_map')
 
 
@@ -290,7 +291,7 @@ def generate_parameters():
     vcfs = glob.glob(input_vcfs)
     for f in vcfs:
         # get the sample id as prefix
-        prefix = os.path.basename(f)[0:-len('.exome.vcf')]
+        prefix = os.path.basename(f)[0:-len('.vcf')]
         yield [f, os.path.join('annotated-with-annovar', prefix+'.avinput')]
 
 
@@ -348,12 +349,20 @@ def filter_common_inhouse(inputs, outputs):
     
     
 @transform(filter_common_inhouse, suffix('.common_inhouse_filtered'), 
-                                        ['.common_inhouse_filtered.common_miseq_filtered', 
-                                         '.common_inhouse_filtered.common_miseq_dropped'])
-def filter_common_miseq(inputs, outputs):
+                                        ['.common_inhouse_filtered.common_miseq30_filtered', 
+                                         '.common_inhouse_filtered.common_miseq30_dropped'])
+def filter_common_miseq30(inputs, outputs):
     # take only the filtered file, leave dropped
-    filter_variants_from_custom_db(inputs[0], outputs, annovar_common_miseq_db, db_name='common_miseq')
+    filter_variants_from_custom_db(inputs[0], outputs, annovar_common_miseq30_db, db_name='common_miseq30')
     
+
+@transform(filter_common_miseq30, suffix('.common_miseq30_filtered'),
+                                        ['.common_miseq30_filtered.common_miseq5_filtered',
+                                         '.common_miseq30_filtered.common_miseq5_dropped'])
+def filter_common_miseq5(inputs, outputs):
+    # take only the filtered file, leave dropped
+    filter_variants_from_custom_db(inputs[0], outputs, annovar_common_miseq5_db, db_name='common_miseq5')
+
     
 #
 # Annotation
@@ -367,12 +376,12 @@ def annotate_variants_with_functional_change(input_file, output_prefix):
         annodb=annovar_human_db))    
     
 
-@transform(filter_common_miseq, suffix('.common_miseq_filtered'), 
-                                        ['.common_miseq_filtered.variant_function',
-                                         '.common_miseq_filtered.exonic_variant_function',
-                                         '.common_miseq_filtered.variant_function.stats',
-                                         '.common_miseq_filtered.exonic_variant_function.stats'])
-def annotate_function_of_rare_variants(inputs, outputs):
+@transform(filter_common_miseq5, suffix('.common_miseq5_filtered'), 
+                                        ['.common_miseq5_filtered.variant_function',
+                                         '.common_miseq5_filtered.exonic_variant_function',
+                                         '.common_miseq5_filtered.variant_function.stats',
+                                         '.common_miseq5_filtered.exonic_variant_function.stats'])
+def annotate_function_of_miseq5_variants(inputs, outputs):
     """ annotate functional change in rare variants """
     filtered = inputs[0]                         # use only the filtered input file, leave dropped
     annotate_variants_with_functional_change(input_file=filtered, output_prefix=filtered)
@@ -381,11 +390,11 @@ def annotate_function_of_rare_variants(inputs, outputs):
     run_cmd("cut -f 2 {f} | sort | uniq -c > {f}.stats".format(f=outputs[1]))
 
 
-@transform(annotate_function_of_rare_variants, 
-           formatter(".*/(?P<SAMPLE_ID>[^/]+).avinput.hg19_EUR.sites.2012_04_filtered.common_inhouse_filtered.common_miseq_filtered.variant_function", None, None, None),
-           ['{path[0]}/annotated-tables/{SAMPLE_ID[0]}.rare_coding_and_splicing.avinput', 
-            '{path[0]}/annotated-tables/{SAMPLE_ID[0]}.rare_coding_and_splicing.avinput.hg19_multianno.csv'])
-def produce_variant_annotation_table(inputs, outputs):
+@transform(annotate_function_of_miseq5_variants, 
+           formatter(".*/(?P<SAMPLE_ID>[^/]+).avinput.hg19_EUR.sites.2012_04_filtered.common_inhouse_filtered.common_miseq30_filtered.common_miseq5_filtered.variant_function", None, None, None),
+           ['{path[0]}/annotated-tables/{SAMPLE_ID[0]}.miseq5_filtered.avinput', 
+            '{path[0]}/annotated-tables/{SAMPLE_ID[0]}.miseq5_filtered.avinput.hg19_multianno.csv'])
+def produce_miseq5_variants_annotation_table(inputs, outputs):
     """ produce a table of various annotations per variant """
         
     dir = 'annotated-with-annovar/annotated-tables'
@@ -426,6 +435,53 @@ def produce_variant_annotation_table(inputs, outputs):
         db=annovar_human_db))
 
 
+@transform(filter_common_miseq30, suffix('.common_miseq30_filtered'), 
+                                        ['.common_miseq30_filtered.variant_function',
+                                         '.common_miseq30_filtered.exonic_variant_function',
+                                         '.common_miseq30_filtered.variant_function.stats',
+                                         '.common_miseq30_filtered.exonic_variant_function.stats'])
+def annotate_function_of_miseq30_variants(inputs, outputs):
+    """ annotate functional change in rare variants """
+    filtered = inputs[0]                         # use only the filtered input file, leave dropped
+    annotate_variants_with_functional_change(input_file=filtered, output_prefix=filtered)
+    # calculate stats on files created by annovar
+    run_cmd("cut -f 1 {f} | sort | uniq -c > {f}.stats".format(f=outputs[0]))
+    run_cmd("cut -f 2 {f} | sort | uniq -c > {f}.stats".format(f=outputs[1]))
+
+
+
+@transform(annotate_function_of_miseq30_variants,
+           formatter(".*/(?P<SAMPLE_ID>[^/]+).avinput.hg19_EUR.sites.2012_04_filtered.common_inhouse_filtered.common_miseq30_filtered.variant_function", None, None, None),
+           ['{path[0]}/annotated-tables/{SAMPLE_ID[0]}.miseq30_filtered.avinput',
+            '{path[0]}/annotated-tables/{SAMPLE_ID[0]}.miseq30_filtered.avinput.hg19_multianno.csv'])
+def produce_miseq30_variants_annotation_table(inputs, outputs):
+    """ produce a table of various annotations per variant """
+
+    dir = 'annotated-with-annovar/annotated-tables'
+    try: os.mkdir(dir)
+    except (OSError): pass # dir exists
+
+    avinput = outputs[0]
+    rare_var_fun = inputs[0]
+
+    f_out = open(avinput,'w')
+    f = open(rare_var_fun)
+    for l in f.xreadlines():
+        lsplit=l.split('\t')
+        f_out.write(string.join(lsplit[2:],'\t'))
+    f.close()
+    f_out.close()
+
+    # annotate all variants selected above
+    run_cmd("table_annovar.pl -protocol refGene,1000g2012apr_eur,1000g2012apr_amr,1000g2012apr_asn,1000g2012apr_afr,snp138,avsift,clinvar_20140211,ljb23_pp2hvar,caddgt10 \
+            -operation g,f,f,f,f,f,f,f,f,f -arg \'-splicing 4\',,,,,,,,,\'-otherinfo\' -nastring NA -build hg19 -csvout -otherinfo \
+            -outfile {output_prefix} {input} {db}".format(
+        output_prefix=avinput,
+        input=avinput,
+        db=annovar_human_db))
+
+
+
 #
 # include omim phenotypes
 
@@ -458,7 +514,7 @@ omim_gene_phenotype_map = get_omim_gene_phenotype_map(omim_gene_phenotype_map_fi
 
 from utility_functions import quote_aware_split, parenthesis_aware_split
 
-@transform(produce_variant_annotation_table, formatter(), '{path[1]}/{basename[1]}.with_omim.csv')
+@transform(produce_miseq5_variants_annotation_table, formatter(), '{path[1]}/{basename[1]}.with_omim.csv')
 def include_omim_phenotype_annotation(inputs, output_table, gene_column=7, omim_column=15, delim=','):
     """ include OMIM phenotype into the annotation table """
     table_in = open(inputs[1],'r')
@@ -644,33 +700,45 @@ def get_stats_on_inhouse_filtered_variants(inputs, outputs):
     """ annotate functional change in inhouse-exomes filtered variants, get stats, and remove annotated files """
     get_stats_on_prefiltered_variants(inputs[0], outputs)
 
+@transform(filter_common_miseq30, suffix('.common_miseq30_filtered'),
+                                        ['.common_miseq30_filtered.variant_function.stats',
+                                         '.common_miseq30_filtered.exonic_variant_function.stats'])
+#def get_stats_on_miseq30_filtered_variants(inputs, outputs):
+#    """ annotate functional change in inhouse-exomes filtered variants, get stats, and remove annotated files """
+#    get_stats_on_prefiltered_variants(inputs[0], outputs)
+
+
 
 @merge([get_stats_on_raw_variants, get_stats_on_1kg_filtered_variants, 
-        get_stats_on_inhouse_filtered_variants, annotate_function_of_rare_variants], 'all_samples_exonic_variant_stats.tsv')
+        get_stats_on_inhouse_filtered_variants, annotate_function_of_miseq30_variants, #get_stats_on_miseq30_filtered_variants, 
+	annotate_function_of_miseq5_variants], 'all_samples_exonic_variant_stats.tsv')
 def produce_variant_stats_table(infiles, table_file):
     """ produce a table of per-sample counts of different type of exonic variants """
 
     var_types=['splicing','UTR3','UTR5','intronic','intergenic','exonic']
     
     # split the input files per task
-    sample_no = len(infiles)/4
+    sample_no = len(infiles)/5
     raw_variant_files = infiles[0:sample_no]
     kg1_filtered_variant_files = infiles[sample_no:sample_no*2]
-    inhouse_filtered_variant_files =  infiles[sample_no*2:sample_no*3]
-    rare_variant_files = infiles[3*sample_no:4*sample_no]
+    inhouse_filtered_variant_files = infiles[sample_no*2:sample_no*3]
+    miseq30_filtered_variant_files = infiles[sample_no*3:sample_no*4]
+    rare_variant_files = infiles[4*sample_no:5*sample_no]
 
     out = open(table_file,'w')
    
     import itertools
     #header = ['sample'] + ['raw_'+t for t in var_types] + ['rare_'+t for t in var_types] + ['raw_synonymous','rare_synonymous']
-    filtering_stages = ['raw_','kg1_','inhouse_','rare_']
+    filtering_stages = ['raw_','kg1_','inhouse_','miseq30_','rare_']
     header = ['sample'] + \
             [f+t for (f,t) in itertools.product(filtering_stages, var_types)] + \
             [s+'_synonymous' for s in filtering_stages]
     out.write(('\t'.join(header))+'\n')
     for i in range(0,sample_no):
         out.write(os.path.basename(raw_variant_files[i][0]).split('.')[0])
-        for fname in [raw_variant_files[i][0], kg1_filtered_variant_files[i][0], inhouse_filtered_variant_files[i][0], rare_variant_files[i][2]]: # exonic variant stats of raw variants and rare variants
+        for fname in [raw_variant_files[i][0], kg1_filtered_variant_files[i][0], \
+                        inhouse_filtered_variant_files[i][0], miseq30_filtered_variant_files[i][2], \
+                        rare_variant_files[i][2]]: # exonic variant stats of raw variants and rare variants
             counts = dict.fromkeys(var_types,'0')
             f=open(fname)        
             for l in f.xreadlines():
@@ -683,7 +751,9 @@ def produce_variant_stats_table(infiles, table_file):
             out.write('\t'+'\t'.join([counts[t] for t in var_types]))
             f.close()
 
-        for fname in [raw_variant_files[i][1], kg1_filtered_variant_files[i][1], inhouse_filtered_variant_files[i][1], rare_variant_files[i][3]]: # synonymous variants stats of raw and rare variants
+        for fname in [raw_variant_files[i][1], kg1_filtered_variant_files[i][1], \
+                        inhouse_filtered_variant_files[i][1], miseq30_filtered_variant_files[i][3], \
+                        rare_variant_files[i][3]]: # synonymous variants stats of raw and rare variants
             f=open(fname)
             found=False
             for l in f.xreadlines():
