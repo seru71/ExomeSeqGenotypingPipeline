@@ -164,8 +164,8 @@ if __name__ == '__main__':
     snps_1kg = config.get('Resources','1000genomes-snps-vcf')
     indels_1kg = config.get('Resources','1000genomes-indels-vcf')
     mills = config.get('Resources','mills-indels-vcf')
-    capture = config.get('Resources','capture-regions-bed')
-    capture_qualimap = config.get('Resources','capture-regions-bed-for-qualimap')
+    #capture = config.get('Resources','capture-regions-bed')
+    #capture_qualimap = config.get('Resources','capture-regions-bed-for-qualimap')
     exome = config.get('Resources', 'exome-regions-bed')
     # tools 
     java = config.get('Tools','java-binary')
@@ -253,38 +253,38 @@ def bam_alignment_metrics(bam,metrics):
                  bam=bam
              ))
     
-def bam_coverage_metrics(input_bam, output):
-    """ Calculates and outputs bam coverage statistics """
-    run_cmd("{java} -Xmx4g -jar {gatk} \
-            -R {reference} \
-            -T DepthOfCoverage \
-            -o {output} \
-            -I {input} \
-            -L {capture} \
-            -ct 8 -ct 20 -ct 30 \
-            --omitDepthOutputAtEachBase --omitLocusTable \
-            ".format(java=java, gatk=gatk,
-                reference=reference,
-                output=output,
-                input=input_bam,
-                capture=capture
-            ))
-
-def qualimap_bam(input_bam, output_dir):
-    """ Generates Qualimap bam QC report """
-    # create necessary folders first
-    if not os.path.exists('qc'): os.mkdir('qc')
-    if not os.path.exists('qc/qualimap/'): os.mkdir('qc/qualimap')
-    if not os.path.exists(output_dir): os.mkdir(output_dir)
-    run_cmd("{qualimap} bamqc -bam {bam} \
-             -c -outformat PDF \
-             -gff {target} \
-             -gd HUMAN -os \
-             -outdir {dir} &> {dir}/qualimap.err".format(
-                qualimap=qualimap,
-                bam=input_bam,
-                target=capture_qualimap,
-                dir=output_dir))
+# def bam_coverage_metrics(input_bam, output):
+#     """ Calculates and outputs bam coverage statistics """
+#     run_cmd("{java} -Xmx4g -jar {gatk} \
+#             -R {reference} \
+#             -T DepthOfCoverage \
+#             -o {output} \
+#             -I {input} \
+#             -L {capture} \
+#             -ct 8 -ct 20 -ct 30 \
+#             --omitDepthOutputAtEachBase --omitLocusTable \
+#             ".format(java=java, gatk=gatk,
+#                 reference=reference,
+#                 output=output,
+#                 input=input_bam,
+#                 capture=capture
+#             ))
+# 
+# def qualimap_bam(input_bam, output_dir):
+#     """ Generates Qualimap bam QC report """
+#     # create necessary folders first
+#     if not os.path.exists('qc'): os.mkdir('qc')
+#     if not os.path.exists('qc/qualimap/'): os.mkdir('qc/qualimap')
+#     if not os.path.exists(output_dir): os.mkdir(output_dir)
+#     run_cmd("{qualimap} bamqc -bam {bam} \
+#              -c -outformat PDF \
+#              -gff {target} \
+#              -gd HUMAN -os \
+#              -outdir {dir} &> {dir}/qualimap.err".format(
+#                 qualimap=qualimap,
+#                 bam=input_bam,
+#                 target=capture_qualimap,
+#                 dir=output_dir))
 
     
     
@@ -495,45 +495,48 @@ def raw_bam_qc():
 # Prepare the bam files for variant calling
 #
 
-def dup_removal_picard(bam,output):
-    """Use Picard to remove duplicates"""
-    run_cmd('%s -Xmx4096m -jar %s/CleanSam.jar \
-             INPUT=%s \
-             OUTPUT=%s \
-             VALIDATION_STRINGENCY=LENIENT VERBOSITY=ERROR CREATE_INDEX=TRUE' 
-             % (java, picard, bam, output))
-   
-def dup_mark_picard(bam,output):
-    """Use Picard to mark duplicates"""
-    run_cmd('%s -Xmx4096m -jar %s/MarkDuplicates.jar \
-            TMP_DIR=/export/astrakanfs/stefanj/tmp \
-            REMOVE_DUPLICATES=true \
-            INPUT=%s \
-            OUTPUT=%s \
-            METRICS_FILE=%s.dup_metrics \
-            VALIDATION_STRINGENCY=LENIENT VERBOSITY=ERROR CREATE_INDEX=true'
-            % (java, picard, bam, output, bam))
+#
+# don't remove duplicates - this is amplicon data
+#
+#def dup_removal_picard(bam,output):
+#    """Use Picard to remove duplicates"""
+#    run_cmd('%s -Xmx4096m -jar %s/CleanSam.jar \
+#             INPUT=%s \
+#              OUTPUT=%s \
+#              VALIDATION_STRINGENCY=LENIENT VERBOSITY=ERROR CREATE_INDEX=TRUE' 
+#              % (java, picard, bam, output))
+#    
+# def dup_mark_picard(bam,output):
+#     """Use Picard to mark duplicates"""
+#     run_cmd('%s -Xmx4096m -jar %s/MarkDuplicates.jar \
+#             TMP_DIR=/export/astrakanfs/stefanj/tmp \
+#             REMOVE_DUPLICATES=true \
+#             INPUT=%s \
+#             OUTPUT=%s \
+#             METRICS_FILE=%s.dup_metrics \
+#             VALIDATION_STRINGENCY=LENIENT VERBOSITY=ERROR CREATE_INDEX=true'
+#             % (java, picard, bam, output, bam))
+# 
+# 
+# @follows(index)
+# @transform(link, suffix(".bam"), '.dedup.bam')
+# def remove_dups(bam, output):
+#     """Use samtools for dupremoval"""
+#     #run_cmd('samtools rmdup %s %s' % (bam,output))
+#     dup_mark_picard(bam, output)
+#     # remove(input)
+# 
+# 
+# #@follows(remove_dups)
+# @transform(remove_dups, suffix(".dedup.bam"), '.dedup.bam.bai')
+# def index_dups(bam, output):
+#     """create bam index"""
+#     index_bam(bam)
 
 
 @follows(index)
-@transform(link, suffix(".bam"), '.dedup.bam')
-def remove_dups(bam, output):
-    """Use samtools for dupremoval"""
-    #run_cmd('samtools rmdup %s %s' % (bam,output))
-    dup_mark_picard(bam, output)
-    # remove(input)
-
-
-#@follows(remove_dups)
-@transform(remove_dups, suffix(".dedup.bam"), '.dedup.bam.bai')
-def index_dups(bam, output):
-    """create bam index"""
-    index_bam(bam)
-
-
-#@follows(index_dups)
-@transform(index_dups, suffix(".dedup.bam.bai"), '.realign.intervals', r'\1.dedup.bam')
-def find_realignment_intervals(foo, intervals, input_bam):
+@transform(link, suffix(".bam"), '.realign.intervals')
+def find_realignment_intervals(input_bam, intervals):
     """Find regions to be re-aligned due to indels"""
     run_cmd("%s -Xmx4g -jar %s \
              -T RealignerTargetCreator \
@@ -547,7 +550,7 @@ def find_realignment_intervals(foo, intervals, input_bam):
 
 
 #@follows(find_realignment_intervals)
-@transform(find_realignment_intervals, suffix(".realign.intervals"), '.realigned.bam', r'\1.dedup.bam')
+@transform(find_realignment_intervals, suffix(".realign.intervals"), '.realigned.bam', r'\1.bam')
 def indel_realigner(intervals_file, realigned_bam, input_bam):
     """Re-aligns regions around indels"""
     run_cmd("%s -Xmx4g -jar %s \
@@ -732,7 +735,7 @@ def call_variants(infiles, output):
 
 #
 #
-# Ganotyping using HaplotypeCaller
+# Genotyping using HaplotypeCaller
 #
 
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.gvcf')
