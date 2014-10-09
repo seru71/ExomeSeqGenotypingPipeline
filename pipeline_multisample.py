@@ -441,8 +441,9 @@ def generate_parameters():
         fq1=fqs[i]
         fq2=fqs[i+1]
         prefix = os.path.basename(fq1).split('_')[0]
-        parameters.append([[os.path.join(prefix, os.path.basename(fq1)), os.path.join(prefix, os.path.basename(fq2))], 
-                          os.path.join(prefix,prefix+'.bam'), prefix])
+        parameters.append([[fq1, fq2], 
+                          [os.path.join(prefix,prefix+'.clean.fq1.gz'), os.path.join(prefix,prefix+'.clean.fq2.gz')],
+                          prefix])
     for job_parameters in parameters:
             yield job_parameters
 
@@ -462,20 +463,21 @@ def trim_reads(fastqs_in, fastqs_out, dirname):
     run_cmd("{java} -jar {trm} PE -phred33 {fq1} {fq2} {fq1_clean} {fq1_drop} {fq2_clean} {fq2_drop} \
             ILLUMINACLIP:{adapters}:2:30:10 \
             LEADING:20 TRAILING:20 SLIDINGWINDOW:4:20 MINLEN:50" % 
-            (java = java, 
-             trm = trimmomatic, 
-             fq1 = fastqs_in[0], fq2 = fastqs_in[1],
-             fq1_clean=fastqs_out[0], fq2_clean=fastqs_out[1],
-             fq1_drop=fastqs_out[0]+'.drop', 
-             fq2_drop=fastqs_out[1]+'.drop',
-             adapters=adapters)
-    
+            (java=java, 
+            trm=trimmomatic, 
+            fq1=fastqs_in[0], fq2=fastqs_in[1],
+            fq1_clean=fastqs_out[0], fq2_clean=fastqs_out[1],
+            fq1_drop=fastqs_out[0]+".drop", 
+            fq2_drop=fastqs_out[1]+".drop", 
+            adapters=adapters))
+
+    # rm dropped reads
+    remove(fastqs_out[0]+".drop")
+    remove(fastqs_out[1]+".drop")
 
 
-
-
-
-@transform(trim_reads, suffix(".clean.fastq.gz"), '.bam')
+#@transform(trim_reads, regex(".clean.fq[12].gz"), ".bam")
+@transform(trim_reads, formatter(".*/(?P<SAMPLE_ID>[^/]+).clean.fq1.gz", None), "{path[0]}/{SAMPLE_ID[0]/{SAMPLE_ID[0]}.bam")
 def align(fastqs, bam, dirname):
     """ Align the reads to the reference and sort """
     
