@@ -427,12 +427,19 @@ if __name__ == '__main__':
 #       Put pipeline code here
 
 def get_sample_ids():
-    files = glob.glob(input_bams)
-    return [ os.path.splitext(os.path.basename(f))[0] for f in files ]
+    if input_bams != None:
+        files = glob.glob(input_bams)
+        return [ os.path.splitext(os.path.basename(f))[0] for f in files ]
+    else:
+        fqs = glob.glob(input_fastqs)
+        return [ os.path.basename(fqs[i]).split('_')[0] for i in range(0,len(fqs),2) ]
 
 def get_num_files():
-    files = glob.glob(input_bams)
-    return len(files)
+    if input_bams != None: 
+        return len(glob.glob(input_bams))
+    else: 
+        return len(glob.glob(input_fastqs)) / 2
+
 
 def generate_parameters():
     fqs = glob.glob(input_fastqs)
@@ -462,14 +469,14 @@ def trim_reads(fastqs_in, fastqs_out, dirname):
     
     run_cmd("{java} -jar {trm} PE -phred33 {fq1} {fq2} {fq1_clean} {fq1_drop} {fq2_clean} {fq2_drop} \
             ILLUMINACLIP:{adapters}:2:30:10 \
-            LEADING:20 TRAILING:20 SLIDINGWINDOW:4:20 MINLEN:50" % 
-            (java=java, 
-            trm=trimmomatic, 
-            fq1=fastqs_in[0], fq2=fastqs_in[1],
-            fq1_clean=fastqs_out[0], fq2_clean=fastqs_out[1],
-            fq1_drop=fastqs_out[0]+".drop", 
-            fq2_drop=fastqs_out[1]+".drop", 
-            adapters=adapters))
+            LEADING:20 TRAILING:20 SLIDINGWINDOW:4:20 MINLEN:50".format(
+                java=java,
+                trm=trimmomatic,
+                fq1=fastqs_in[0], fq2=fastqs_in[1],
+                fq1_clean=fastqs_out[0], fq2_clean=fastqs_out[1],
+                fq1_drop=fastqs_out[0]+".drop",
+                fq2_drop=fastqs_out[1]+".drop",
+                adapters=adapters))
 
     # rm dropped reads
     remove(fastqs_out[0]+".drop")
@@ -477,13 +484,13 @@ def trim_reads(fastqs_in, fastqs_out, dirname):
 
 
 #@transform(trim_reads, regex(".clean.fq[12].gz"), ".bam")
-@transform(trim_reads, formatter(".*/(?P<SAMPLE_ID>[^/]+).clean.fq1.gz", None), "{path[0]}/{SAMPLE_ID[0]/{SAMPLE_ID[0]}.bam")
+@transform(trim_reads, formatter(".*/(?P<SAMPLE_ID>[^/]+).clean.fq1.gz", None), "{SAMPLE_ID[0]}/{SAMPLE_ID[0]}.bam")
 def align(fastqs, bam, dirname):
     """ Align the reads to the reference and sort """
     
     # align
-    run_cmd("{bwa} mem {ref} {fq1} {fq2} | {samtools} view -bT - | {samtools} sort -f - {bam}" % 
-            (bwa=bwa,
+    run_cmd("{bwa} mem {ref} {fq1} {fq2} | {samtools} view -bT - | {samtools} sort -f - {bam}".format(
+            bwa=bwa,
             samtools=samtools,
             ref=reference,
             fq1=fastqs[0],
@@ -491,8 +498,8 @@ def align(fastqs, bam, dirname):
             bam=bam))
     
     # add read groups...
-    run_cmd("{java} -jar {add_rd} I={bam} O={rg_bam} LB=lib PL=illumina PU=unit SM={sample}" % 
-            (java=java, 
+    run_cmd("{java} -jar {add_rd} I={bam} O={rg_bam} LB=lib PL=illumina PU=unit SM={sample}".format( 
+             java=java, 
              add_rg=os.path.join(picard,"AddOrReplaceReadGroups.jar"),
              bam=bam,
              rg_bam=bam+".tmp",
