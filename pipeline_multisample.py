@@ -163,6 +163,7 @@ if __name__ == '__main__':
 
     # reference files
     reference = config.get('Resources','reference-genome')
+    bwa_reference = config.get('Resources','bwa-reference')
     dbsnp = config.get('Resources','dbsnp-vcf')
     hapmap = config.get('Resources','hapmap-vcf')
     omni = config.get('Resources','1000genomes-omni-vcf')
@@ -431,8 +432,8 @@ def get_sample_ids():
         files = glob.glob(input_bams)
         return [ os.path.splitext(os.path.basename(f))[0] for f in files ]
     else:
-        fqs = glob.glob(input_fastqs)
-        return [ os.path.basename(fqs[i]).split('_')[0] for i in range(0,len(fqs),2) ]
+        fqs = sorted(glob.glob(input_fastqs))
+        return [ os.path.basename(fqs[i]).split('_L')[0] for i in range(0,len(fqs),2) ]
 
 def get_num_files():
     if input_bams != None: 
@@ -442,12 +443,12 @@ def get_num_files():
 
 
 def generate_parameters():
-    fqs = glob.glob(input_fastqs)
+    fqs = sorted(glob.glob(input_fastqs))
     parameters = []
     for i in range(0,len(fqs),2):
         fq1=fqs[i]
         fq2=fqs[i+1]
-        prefix = os.path.basename(fq1).split('_')[0]
+        prefix = os.path.basename(fq1).split('_L')[0]
         parameters.append([[fq1, fq2], 
                           [os.path.join(prefix,prefix+'.clean.fq1.gz'), os.path.join(prefix,prefix+'.clean.fq2.gz')],
                           prefix])
@@ -484,26 +485,27 @@ def trim_reads(fastqs_in, fastqs_out, dirname):
 
 
 #@transform(trim_reads, regex(".clean.fq[12].gz"), ".bam")
-@transform(trim_reads, formatter(".*/(?P<SAMPLE_ID>[^/]+).clean.fq1.gz", None), "{SAMPLE_ID[0]}/{SAMPLE_ID[0]}.bam")
-def align(fastqs, bam, dirname):
+@transform(trim_reads, formatter(".*/(?P<SAMPLE_ID>[^/]+).clean.fq1.gz", None), "{SAMPLE_ID[0]}/{SAMPLE_ID[0]}.bam","{SAMPLE_ID[0]}")
+def align(fastqs, bam, sample_name):
     """ Align the reads to the reference and sort """
     
     # align
-    run_cmd("{bwa} mem {ref} {fq1} {fq2} | {samtools} view -bT - | {samtools} sort -f - {bam}".format(
+    run_cmd("{bwa} mem {ref} {fq1} {fq2} | {samtools} view -bT {ref} - | {samtools} sort -f - {bam}".format(
             bwa=bwa,
             samtools=samtools,
-            ref=reference,
+            ref=bwa_reference,
             fq1=fastqs[0],
             fq2=fastqs[1],
             bam=bam))
-    
+ 
+   
     # add read groups...
-    run_cmd("{java} -jar {add_rd} I={bam} O={rg_bam} LB=lib PL=illumina PU=unit SM={sample}".format( 
+    run_cmd("{java} -jar {add_rg} I={bam} O={rg_bam} LB={sample} PL=illumina PU=unit SM={sample}".format( 
              java=java, 
              add_rg=os.path.join(picard,"AddOrReplaceReadGroups.jar"),
              bam=bam,
              rg_bam=bam+".tmp",
-             sample=dirname))
+             sample=sample_name))
     # ..."in-place"
     rename(bam+".tmp", bam)
     

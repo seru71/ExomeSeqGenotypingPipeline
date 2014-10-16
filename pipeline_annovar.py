@@ -700,9 +700,9 @@ def get_stats_on_inhouse_filtered_variants(inputs, outputs):
     """ annotate functional change in inhouse-exomes filtered variants, get stats, and remove annotated files """
     get_stats_on_prefiltered_variants(inputs[0], outputs)
 
-@transform(filter_common_miseq30, suffix('.common_miseq30_filtered'),
-                                        ['.common_miseq30_filtered.variant_function.stats',
-                                         '.common_miseq30_filtered.exonic_variant_function.stats'])
+#@transform(filter_common_miseq30, suffix('.common_miseq30_filtered'),
+#                                        ['.common_miseq30_filtered.variant_function.stats',
+#                                         '.common_miseq30_filtered.exonic_variant_function.stats'])
 #def get_stats_on_miseq30_filtered_variants(inputs, outputs):
 #    """ annotate functional change in inhouse-exomes filtered variants, get stats, and remove annotated files """
 #    get_stats_on_prefiltered_variants(inputs[0], outputs)
