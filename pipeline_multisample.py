@@ -170,7 +170,7 @@ if __name__ == '__main__':
     snps_1kg = config.get('Resources','1000genomes-snps-vcf')
     indels_1kg = config.get('Resources','1000genomes-indels-vcf')
     mills = config.get('Resources','mills-indels-vcf')
-    #capture = config.get('Resources','capture-regions-bed')
+    capture = config.get('Resources','capture-regions-bed')
     #capture_qualimap = config.get('Resources','capture-regions-bed-for-qualimap')
     exome = config.get('Resources', 'exome-regions-bed')
     adapters = config.get('Resources', 'trimmomatic-adapters')
@@ -264,23 +264,23 @@ def bam_alignment_metrics(bam,metrics):
                  bam=bam
              ))
     
-# def bam_coverage_metrics(input_bam, output):
-#     """ Calculates and outputs bam coverage statistics """
-#     run_cmd("{java} -Xmx4g -jar {gatk} \
-#             -R {reference} \
-#             -T DepthOfCoverage \
-#             -o {output} \
-#             -I {input} \
-#             -L {capture} \
-#             -ct 8 -ct 20 -ct 30 \
-#             --omitDepthOutputAtEachBase --omitLocusTable \
-#             ".format(java=java, gatk=gatk,
-#                 reference=reference,
-#                 output=output,
-#                 input=input_bam,
-#                 capture=capture
-#             ))
-# 
+def bam_coverage_metrics(input_bam, output):
+    """ Calculates and outputs bam coverage statistics """
+    run_cmd("{java} -Xmx4g -jar {gatk} \
+            -R {reference} \
+            -T DepthOfCoverage \
+            -o {output} \
+            -I {input} \
+            -L {capture} \
+            -ct 8 -ct 20 -ct 30 \
+            --omitDepthOutputAtEachBase --omitLocusTable \
+            ".format(java=java, gatk=gatk,
+                reference=reference,
+                output=output,
+                input=input_bam,
+                capture=capture
+            ))
+ 
 # def qualimap_bam(input_bam, output_dir):
 #     """ Generates Qualimap bam QC report """
 #     # create necessary folders first
@@ -606,11 +606,12 @@ def find_realignment_intervals(input_bam, intervals):
              -T RealignerTargetCreator \
              -I %s \
              -R %s \
+             -L %s \
              -known %s \
              -known %s \
              -o %s \
-             -nt %d" 
-             % (java, gatk, input_bam, reference, indels_1kg, mills, intervals, n_cpus))
+             -dcov 3000 -nt %d" 
+             % (java, gatk, input_bam, reference, exome, indels_1kg, mills, intervals, n_cpus))
 
 
 #@follows(find_realignment_intervals)
@@ -621,11 +622,12 @@ def indel_realigner(intervals_file, realigned_bam, input_bam):
              -T IndelRealigner \
              -I %s \
              -R %s \
+             -L %s \
              -targetIntervals %s \
              -known %s \
              -known %s \
              -o %s" 
-             % (java, gatk, input_bam, reference, intervals_file, indels_1kg, mills, realigned_bam))
+             % (java, gatk, input_bam, reference, exome, intervals_file, indels_1kg, mills, realigned_bam))
 
 
 #@follows(indel_realigner)
@@ -636,11 +638,12 @@ def recalibrate_baseq1(input_bam, output):
     run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx8g -jar %s \
             -T BaseRecalibrator \
             -R %s \
+            -L %s \
             -knownSites %s \
             -I %s \
             -o %s \
             -nct %d"
-            % (java, gatk, reference, dbsnp, input_bam, output, n_cpus))
+            % (java, gatk, reference, exome, dbsnp, input_bam, output, n_cpus))
     
 
 # This custom check ensures that the recalibrate_baseq2 step is not run in --rebuild_mode if the .gatk.bam exists
@@ -663,11 +666,12 @@ def recalibrate_baseq2(inputs, output_bam):
     run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx4g -jar %s \
             -T PrintReads \
             -R %s \
+            -L %s \
             -I %s \
             --out %s \
             -BQSR %s \
             -nct %d" 
-            % (java, gatk, reference, bam, output_bam, recal_data, n_cpus) )
+            % (java, gatk, reference, exome, bam, output_bam, recal_data, n_cpus) )
   
     # remove(inputs[0])
 
@@ -815,6 +819,7 @@ def call_haplotypes(bam, output_gvcf):
             --variant_index_parameter 128000 \
             -minPruning 4 \
             -L %s \
+            -dcov 3000 \
             --dbsnp %s " % (java, gatk, reference, bam, output_gvcf, exome, dbsnp)
 #             -nct %s \
 #             -stand_call_conf 50.0 \
@@ -828,7 +833,7 @@ def call_haplotypes(bam, output_gvcf):
 def genotype_gvcfs(gvcfs, output):
     """Combine the per-sample GVCF files and genotype""" 
     cmd = "nice %s -Xmx4g -jar %s -T GenotypeGVCFs \
-            -R %s -o %s -nt %s" % (java, gatk, reference, output, options.jobs)
+            -R %s -o %s -dcov 3000 -nt %s" % (java, gatk, reference, output, options.jobs)
        
     for gvcf in gvcfs:
         cmd = cmd + " --variant {}".format(gvcf)
