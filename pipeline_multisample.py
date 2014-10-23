@@ -566,7 +566,7 @@ def indel_realigner(intervals_file, realigned_bam, input_bam):
 def recalibrate_baseq1(input_bam, output):
     """Base quality score recalibration in bam file - first pass """
     index_bam(input_bam)
-    run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx8g -jar %s \
+    run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx6g -jar %s \
             -T BaseRecalibrator \
             -R %s \
             -knownSites %s \
@@ -651,7 +651,7 @@ def gatk_bam_qc():
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.reduced.bam')
 def reduce_bam(bam, output):
     """Reduces the BAM file using read based compression that keeps only essential information for variant calling"""
-    run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx15g -jar %s \
+    run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx6g -jar %s \
             -T ReduceReads \
             -R %s \
             -I %s \
@@ -738,7 +738,7 @@ def call_variants(infiles, output):
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.gvcf')
 def call_haplotypes(bam, output_gvcf):
     """Perform variant calling using GATK HaplotypeCaller"""
-    cmd = "nice %s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx24g -jar %s \
+    cmd = "nice %s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx6g -jar %s \
             -T HaplotypeCaller \
             -R %s \
             -I %s \
@@ -760,7 +760,7 @@ def call_haplotypes(bam, output_gvcf):
 @merge(call_haplotypes, 'multisample.gatk.vcf')
 def genotype_gvcfs(gvcfs, output):
     """Combine the per-sample GVCF files and genotype""" 
-    cmd = "nice %s -Xmx4g -jar %s -T GenotypeGVCFs \
+    cmd = "nice %s -Xmx16g -jar %s -T GenotypeGVCFs \
             -R %s -o %s -nt %s" % (java, gatk, reference, output, options.jobs)
        
     for gvcf in gvcfs:
