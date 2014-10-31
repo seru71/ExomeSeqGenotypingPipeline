@@ -159,6 +159,9 @@ if __name__ == '__main__':
     # variant calls from other projects to call together with (semicolon separated list)
     try: 
         call_with_gvcfs = [ path.strip() for path in config.get('Inputs','call-with-gvcfs').split(";") ]
+	#print 'Calling will be done together with:'
+	#for p in call_with_gvcfs:
+	#	print '\t',p
     except (ConfigParser.NoOptionError): 
         call_with_gvcfs = [] 
     
@@ -776,9 +779,28 @@ def merge_gvcfs(gvcfs, merged_gvcf):
     run_cmd(cmd)
     
 
+@originate(call_with_gvcfs)
+def call_with_gvcfs_as_arguments_task(gvcfs):
+	pass
 
-@transform(merge_gvcfs, 'multisample.gatk.vcf')
-def genotype_gvcfs(gvcf, output):
+@merge([merge_gvcfs, call_with_gvcfs_as_arguments_task], 'multisample.gatk.vcf')
+def genotype_gvcfs(gvcfs, output):
+    """ Genotype this project's merged GVCF together with other project-wide GVCF files (provided in settings) """
+    cmd = "nice %s -Xmx4g -jar %s -T GenotypeGVCFs \
+            -R %s -o %s -nt %s" % (java, gatk, reference, output, options.jobs)
+
+    # if there are any external gvcfs to call with, include them
+    for gvcf in gvcfs:
+        cmd = cmd + " --variant {}".format(gvcf)
+
+    cmd = cmd + '&> {}.log'.format(output)
+    run_cmd(cmd)
+
+
+
+
+@transform(merge_gvcfs, suffix('.gvcf'), '.vcf')
+def genotype_gvcfs2(gvcf, output):
     """ Genotype this project's merged GVCF together with other project-wide GVCF files (provided in settings) """ 
     cmd = "nice %s -Xmx4g -jar %s -T GenotypeGVCFs \
             -R %s -o %s -nt %s \
@@ -1012,7 +1034,7 @@ if __name__ == '__main__':
     if options.just_print:
         pipeline_printout(sys.stdout, options.target_tasks, options.forced_tasks,
                             gnu_make_maximal_rebuild_mode = options.rebuild_mode,
-                            verbose=options.verbose,
+                            verbose=options.verbose, #verbose_abbreviated_path=0,
                             checksum_level = 0)
 
     elif options.flowchart:
