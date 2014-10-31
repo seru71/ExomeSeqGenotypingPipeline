@@ -156,6 +156,12 @@ if __name__ == '__main__':
     config.read(options.pipeline_settings)
     # inputs 
     input_bams = config.get('Inputs','input-bams')
+    # variant calls from other projects to call together with (semicolon separated list)
+    try: 
+        call_with_gvcfs = [ path.strip() for path in config.get('Inputs','call-with-gvcfs').split(";") ]
+    except (ConfigParser.NoOptionError): 
+        call_with_gvcfs = [] 
+    
     # reference files
     reference = config.get('Resources','reference-genome')
     dbsnp = config.get('Resources','dbsnp-vcf')
@@ -757,13 +763,30 @@ def call_haplotypes(bam, output_gvcf):
     run_cmd(cmd)
 
 
-@merge(call_haplotypes, 'multisample.gatk.vcf')
-def genotype_gvcfs(gvcfs, output):
-    """Combine the per-sample GVCF files and genotype""" 
-    cmd = "nice %s -Xmx4g -jar %s -T GenotypeGVCFs \
-            -R %s -o %s -nt %s" % (java, gatk, reference, output, options.jobs)
+
+@merge(call_haplotypes, 'multisample.gatk.gvcf')
+def merge_gvcfs(gvcfs, merged_gvcf):
+    """Combine the per-sample GVCF files into one project-wide GVCF""" 
+    cmd = "nice %s -Xmx4g -jar %s -T CombineGVCFs \
+            -R %s -o %s -nt %s" % (java, gatk, reference, merged_gvcf, options.jobs)
        
     for gvcf in gvcfs:
+        cmd = cmd + " --variant {}".format(gvcf)
+    
+    cmd = cmd + '&> {}.log'.format(merged_gvcf)
+    run_cmd(cmd)
+    
+
+
+@transform(merge_gvcfs, 'multisample.gatk.vcf')
+def genotype_gvcfs(gvcf, output):
+    """ Genotype this project's merged GVCF together with other project-wide GVCF files (provided in settings) """ 
+    cmd = "nice %s -Xmx4g -jar %s -T GenotypeGVCFs \
+            -R %s -o %s -nt %s \
+            --variant %s" % (java, gatk, reference, output, options.jobs, gvcf)
+       
+    # if there are any external gvcfs to call with, include them
+    for gvcf in call_with_gvcfs:
         cmd = cmd + " --variant {}".format(gvcf)
     
     cmd = cmd + '&> {}.log'.format(output)
