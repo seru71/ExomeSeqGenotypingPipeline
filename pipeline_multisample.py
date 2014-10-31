@@ -798,23 +798,6 @@ def genotype_gvcfs(gvcfs, output):
 
 
 
-
-@transform(merge_gvcfs, suffix('.gvcf'), '.vcf')
-def genotype_gvcfs2(gvcf, output):
-    """ Genotype this project's merged GVCF together with other project-wide GVCF files (provided in settings) """ 
-    cmd = "nice %s -Xmx4g -jar %s -T GenotypeGVCFs \
-            -R %s -o %s -nt %s \
-            --variant %s" % (java, gatk, reference, output, options.jobs, gvcf)
-       
-    # if there are any external gvcfs to call with, include them
-    for gvcf in call_with_gvcfs:
-        cmd = cmd + " --variant {}".format(gvcf)
-    
-    cmd = cmd + '&> {}.log'.format(output)
-    run_cmd(cmd)
-
-
-
 #
 #
 # Variant recalisbration and filtering
