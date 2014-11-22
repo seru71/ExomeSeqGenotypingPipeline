@@ -787,7 +787,7 @@ def call_with_gvcfs_as_arguments_task(gvcfs):
 @merge([merge_gvcfs, call_with_gvcfs_as_arguments_task], 'multisample.gatk.vcf')
 def genotype_gvcfs(gvcfs, output):
     """ Genotype this project's merged GVCF together with other project-wide GVCF files (provided in settings) """
-    cmd = "nice %s -Xmx4g -jar %s -T GenotypeGVCFs \
+    cmd = "nice %s -Xmx8g -jar %s -T GenotypeGVCFs \
             -R %s -o %s -nt %s" % (java_with_params, gatk, reference, output, options.jobs)
 
     # if there are any external gvcfs to call with, include them
