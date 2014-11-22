@@ -544,8 +544,8 @@ def index_dups(bam, output):
 #@follows(index_dups)
 @transform(index_dups, suffix(".dedup.bam.bai"), '.realign.intervals', r'\1.dedup.bam')
 def find_realignment_intervals(foo, intervals, input_bam):
-    """Find regions to be re-aligned due to indels"""
-    run_cmd("%s -Xmx4g -jar %s \
+    
+    run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx4g -jar %s \
              -T RealignerTargetCreator \
              -I %s \
              -R %s \
