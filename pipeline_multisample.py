@@ -178,6 +178,7 @@ if __name__ == '__main__':
     exome = config.get('Resources', 'exome-regions-bed')
     # tools 
     java = config.get('Tools','java-binary')
+    java_with_params = java+' -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp'
     picard = config.get('Tools','picard-tools-path')
     qualimap = config.get('Tools','qualimap')
     gatk = config.get('Tools','gatk-jar')
@@ -575,14 +576,14 @@ def indel_realigner(intervals_file, realigned_bam, input_bam):
 def recalibrate_baseq1(input_bam, output):
     """Base quality score recalibration in bam file - first pass """
     index_bam(input_bam)
-    run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx6g -jar %s \
+    run_cmd("%s -Xmx6g -jar %s \
             -T BaseRecalibrator \
             -R %s \
             -knownSites %s \
             -I %s \
             -o %s \
             -nct %d"
-            % (java, gatk, reference, dbsnp, input_bam, output, n_cpus))
+            % (java_with_params, gatk, reference, dbsnp, input_bam, output, n_cpus))
     
 
 # This custom check ensures that the recalibrate_baseq2 step is not run in --rebuild_mode if the .gatk.bam exists
@@ -602,14 +603,14 @@ def recalibrate_baseq2(inputs, output_bam):
         Part 2: rewrite quality scores into a new bam file"""   
     bam = inputs[0]
     recal_data = inputs[1]
-    run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx4g -jar %s \
+    run_cmd("%s -Xmx4g -jar %s \
             -T PrintReads \
             -R %s \
             -I %s \
             --out %s \
             -BQSR %s \
             -nct %d" 
-            % (java, gatk, reference, bam, output_bam, recal_data, n_cpus) )
+            % (java_with_params, gatk, reference, bam, output_bam, recal_data, n_cpus) )
   
     # remove(inputs[0])
 
@@ -660,12 +661,12 @@ def gatk_bam_qc():
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.reduced.bam')
 def reduce_bam(bam, output):
     """Reduces the BAM file using read based compression that keeps only essential information for variant calling"""
-    run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx6g -jar %s \
+    run_cmd("%s -Xmx6g -jar %s \
             -T ReduceReads \
             -R %s \
             -I %s \
             -o %s"
-            % (java, gatk, reference, bam, output))
+            % (java_with_params, gatk, reference, bam, output))
 
 
 def split_seq(seq, num_pieces):
@@ -678,13 +679,13 @@ def split_seq(seq, num_pieces):
 
 def multisample_variant_call(bams, output):
     """Perform multi-sample variant calling using GATK"""
-    cmd = "nice %s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx8g -jar %s \
+    cmd = "nice %s -Xmx8g -jar %s \
             -T UnifiedGenotyper \
             -R %s \
             -o %s \
             -glm BOTH \
             -nt %s \
-            --dbsnp %s " % (java, gatk, reference, output, options.jobs, dbsnp)
+            --dbsnp %s " % (java_with_params, gatk, reference, output, options.jobs, dbsnp)
     for bam in bams:
         cmd = cmd + '-I {} '.format(bam)
     #log the results
@@ -747,7 +748,7 @@ def call_variants(infiles, output):
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.gvcf')
 def call_haplotypes(bam, output_gvcf):
     """Perform variant calling using GATK HaplotypeCaller"""
-    cmd = "nice %s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx6g -jar %s \
+    cmd = "nice %s -Xmx6g -jar %s \
             -T HaplotypeCaller \
             -R %s \
             -I %s \
@@ -757,7 +758,7 @@ def call_haplotypes(bam, output_gvcf):
             --variant_index_parameter 128000 \
             -minPruning 4 \
             -L %s \
-            --dbsnp %s " % (java, gatk, reference, bam, output_gvcf, exome, dbsnp)
+            --dbsnp %s " % (java_with_params, gatk, reference, bam, output_gvcf, exome, dbsnp)
 #             -nct %s \
 #             -stand_call_conf 50.0 \
 
@@ -770,7 +771,7 @@ def call_haplotypes(bam, output_gvcf):
 def merge_gvcfs(gvcfs, merged_gvcf):
     """Combine the per-sample GVCF files into one project-wide GVCF""" 
     cmd = "nice %s -Xmx4g -jar %s -T CombineGVCFs \
-            -R %s -o %s" % (java, gatk, reference, merged_gvcf)
+            -R %s -o %s" % (java_with_params, gatk, reference, merged_gvcf)
        
     for gvcf in gvcfs:
         cmd = cmd + " --variant {}".format(gvcf)
@@ -781,13 +782,13 @@ def merge_gvcfs(gvcfs, merged_gvcf):
 
 @originate(call_with_gvcfs)
 def call_with_gvcfs_as_arguments_task(gvcfs):
-	pass
+    pass
 
 @merge([merge_gvcfs, call_with_gvcfs_as_arguments_task], 'multisample.gatk.vcf')
 def genotype_gvcfs(gvcfs, output):
     """ Genotype this project's merged GVCF together with other project-wide GVCF files (provided in settings) """
     cmd = "nice %s -Xmx4g -jar %s -T GenotypeGVCFs \
-            -R %s -o %s -nt %s" % (java, gatk, reference, output, options.jobs)
+            -R %s -o %s -nt %s" % (java_with_params, gatk, reference, output, options.jobs)
 
     # if there are any external gvcfs to call with, include them
     for gvcf in gvcfs:
@@ -822,7 +823,7 @@ def find_snp_tranches_for_recalibration(vcf,outputs):
             -tranchesFile {tranches} \
             -rscriptFile {plots}\
             -nt {num_jobs}".format(
-                java=java,
+                java=java_with_params,
                 gatk=gatk,
                 reference=reference,
                 hapmap=hapmap,
@@ -857,7 +858,7 @@ def find_indel_tranches_for_recalibration(vcf,outputs):
             -tranchesFile {tranches} \
             -rscriptFile {plots}\
             -nt {num_jobs}".format(
-                java=java,
+                java=java_with_params,
                 gatk=gatk,
                 reference=reference,
                 mills=mills,
@@ -885,7 +886,7 @@ def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP'):
             -mode {mode} \
             -nt {num_jobs} \
             -o {output}".format(
-                java=java,
+                java=java_with_params,
                 gatk=gatk,
                 reference=reference,
                 vcf=vcf,
@@ -926,7 +927,7 @@ def filter_variants(input_vcf, output_vcf):
             --filterName QDFilter   \
             --filterName DPFilter   \
             -R {reference}'.format(
-                java=java,
+                java=java_with_params,
                 gatk=gatk,
                 output=output_vcf,
                 input=input_vcf,
@@ -946,7 +947,7 @@ def remove_filtered(input_vcf, output_vcf):
             --variant {input} \
             -o {output} \
             -env -ef".format(
-                java=java,
+                java=java_with_params,
                 gatk=gatk,
                 reference=reference,
                 input=input_vcf,
@@ -1001,7 +1002,7 @@ def split_snps(vcf, output, sample):
             -sn {sample} \
             -select 'vc.getGenotype(\"{sample}\").getAD().1 >= {ad_thr} && vc.getGenotype(\"{sample}\").getDP() >= {dp_thr}' \
             -o {out} \
-            ".format(java=java, gatk=gatk, ref=reference, 
+            ".format(java=java_with_params, gatk=gatk, ref=reference, 
                 vcf=vcf, sample=sample, out=output, 
                 ad_thr=AD_threshold, 
                 dp_thr=DP_threshold))
