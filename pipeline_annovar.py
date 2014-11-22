@@ -155,6 +155,7 @@ if __name__ == '__main__':
     # reference dbs
     annovar_human_db = config.get('Resources','annovar-humandb-dir')
     annovar_1000genomes_eur = config.get('Resources','annovar-1000genomes-eur')
+    annovar_1000genomes_eur_maf = config.get('Resources','annovar-1000genomes-eur-MAF-cutoff')
     annovar_inhouse_db = config.get('Resources','annovar-inhouse-db')
     omim_gene_phenotype_map_file = config.get('Resources','omim_gene_phenotype_map')
 
@@ -329,7 +330,7 @@ def filter_common_1000genomes(inputs, outputs):
     run_cmd("annotate_variation.pl -build hg19 -filter -dbtype {eur1kg} \
         -maf {maf} -outfile {output_prefix} {input_file} {annodb}".format(
         eur1kg=annovar_1000genomes_eur,
-        maf=0.005, 
+        maf=annovar_1000genomes_eur_maf, 
         output_prefix=filtered,
         input_file=filtered, 
         annodb=annovar_human_db))
