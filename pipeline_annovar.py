@@ -308,31 +308,33 @@ def prepare_annovar_inputs(vcf, output):
 @transform(prepare_annovar_inputs, suffix('.avinput'), 
                                         ['.avinput.hg19_EUR.sites.2012_04_filtered', 
                                          '.avinput.hg19_EUR.sites.2012_04_dropped'])
-def filter_common_1000genomes(inputs, outputs):
+def filter_common_1000genomes(input, outputs):
     """ filter common 1000 genomes variants """
-    filtered = inputs[0]                      # take only the filtered file, leave dropped
     run_cmd("annotate_variation.pl -build hg19 -filter -dbtype {eur1kg} \
         -maf {maf} -outfile {output_prefix} {input_file} {annodb}".format(
         eur1kg=annovar_1000genomes_eur,
         maf=annovar_1000genomes_eur_maf, 
-        output_prefix=filtered,
-        input_file=filtered, 
+        output_prefix=input,
+        input_file=input, 
         annodb=annovar_human_db))
 
 @transform(filter_common_1000genomes, suffix('.hg19_EUR.sites.2012_04_filtered'),
                                         ['.hg19_EUR.sites.2012_04_filtered.common_inhouse_filtered',
                                          '.hg19_EUR.sites.2012_04_filtered.common_inhouse_dropped'])
-def filter_common_inhouse(input, outputs):
+def filter_common_inhouse(inputs, outputs):
+    filtered = inputs[0]                      # take only the filtered file, leave dropped
+
     """ filter variants found in the inhouse database. OBS! output specifies the filename after rename """    
     run_cmd("annotate_variation.pl -build hg19 -filter -dbtype generic -genericdbfile {inhouse} \
         -outfile {outfile} {input} {annodb}".format(
         inhouse=annovar_inhouse_db, 
-        outfile=input, 
-        input=input, 
+        outfile=filtered, 
+        input=filtered, 
         annodb=annovar_human_db))
 
     for output_file in outputs: 
         os.rename(output_file.replace('common_inhouse','hg19_generic'), output_file)
+
 
 
 def get_stats_on_prefiltered_variants(input, outputs, cleanup=True):    
