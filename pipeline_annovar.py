@@ -335,12 +335,20 @@ def filter_common_inhouse(input, outputs):
         os.rename(output_file.replace('common_inhouse','hg19_generic'), output_file)
 
 
+def get_stats_on_prefiltered_variants(input, outputs, cleanup=True):    
 
-def annotate_variants_with_functional_change(input_file, output_prefix):
     run_cmd("annotate_variation.pl -buildver hg19 -outfile {outfile_prefix} {input_file} {annodb}".format(
-        outfile_prefix=output_prefix, 
-        input_file=input_file, 
+        outfile_prefix=input, 
+        input_file=input, 
         annodb=annovar_human_db))
+
+    # calculate stats on files created by annovar - output files without ".stats" suffix
+    run_cmd("cut -f 1 {f} | sort | uniq -c > {f}.stats".format(f=outputs[0][:-len('.stats')]))
+    run_cmd("cut -f 2 {f} | sort | uniq -c > {f}.stats".format(f=outputs[1][:-len('.stats')]))
+    # remove the annovar files
+    if cleanup:
+        os.remove(outputs[0][:-len('.stats')])
+        os.remove(outputs[1][:-len('.stats')])
 
 
 @transform(filter_common_inhouse, suffix('.common_inhouse_filtered'), 
@@ -350,11 +358,8 @@ def annotate_variants_with_functional_change(input_file, output_prefix):
                                          '.common_inhouse_filtered.exonic_variant_function.stats'])
 def annotate_function_of_rare_variants(inputs, outputs):
     """ annotate functional change in rare variants """
-    filtered = inputs[0]                         # use only the filtered input file, leave dropped
-    annotate_variants_with_functional_change(input_file=filtered, output_prefix=filtered)
-    # calculate stats on files created by annovar
-    run_cmd("cut -f 1 {f} | sort | uniq -c > {f}.stats".format(f=outputs[0]))
-    run_cmd("cut -f 2 {f} | sort | uniq -c > {f}.stats".format(f=outputs[1]))
+    filtered = inputs[0]              # use only the filtered input file, leave dropped
+    get_stats_on_prefiltered_variants(input=filtered, outputs=outputs[3:4], cleanup=False)
 
 
 @transform(annotate_function_of_rare_variants, 
@@ -582,45 +587,77 @@ def count_hetz_and_homz_per_chr(infiles, table_files):
 
     hetz.close()
     homz.close()
-
+    
 
 @transform(prepare_annovar_inputs, suffix('.avinput'), ['.avinput.variant_function.stats','.avinput.exonic_variant_function.stats'])
-def annotate_function_of_raw_variants(input, outputs):
-    """ annotate functional change in raw variants """
-    annotate_variants_with_functional_change(input_file=input, output_prefix=input)
-    # calculate stats on files created by annovar - output files without ".stats" suffix
-    run_cmd("cut -f 1 {f} | sort | uniq -c > {f}.stats".format(f=outputs[0][:-len('.stats')]))
-    run_cmd("cut -f 2 {f} | sort | uniq -c > {f}.stats".format(f=outputs[1][:-len('.stats')]))
-    # remove the annovar files
-    os.remove(outputs[0][:-len('.stats')])
-    os.remove(outputs[1][:-len('.stats')])
+def get_stats_on_raw_variants(input, outputs):
+    """ annotate functional change in raw variants, get stats, and remove annotated files """
+    get_stats_on_prefiltered_variants(input, outputs)
 
 
-@merge([annotate_function_of_raw_variants, annotate_function_of_rare_variants], 'all_samples_exonic_variant_stats.tsv')
+@transform(filter_common_1000genomes, suffix('.hg19_EUR.sites.2012_04_filtered'), 
+                                        ['.hg19_EUR.sites.2012_04_filtered.variant_function.stats',
+                                         '.hg19_EUR.sites.2012_04_filtered.exonic_variant_function.stats'])
+def get_stats_on_1kg_filtered_variants(inputs, outputs):
+    """ annotate functional change in 1kg filtered variants, get stats, and remove annotated files """
+    get_stats_on_prefiltered_variants(inputs[0], outputs)
+
+# equivalent of annotate_rare_variants (input and output files are the same)
+@transform(filter_common_inhouse, suffix('.common_inhouse_filtered'), 
+                                        ['.common_inhouse_filtered.variant_function.stats',
+                                         '.common_inhouse_filtered.exonic_variant_function.stats'])
+def get_stats_on_inhouse_filtered_variants(inputs, outputs):
+    """ annotate functional change in inhouse-exomes filtered variants, get stats, and remove annotated files """
+    get_stats_on_prefiltered_variants(inputs[0], outputs, cleanup=False)
+
+
+
+@merge([get_stats_on_raw_variants, get_stats_on_1kg_filtered_variants, 
+        get_stats_on_inhouse_filtered_variants], 'all_samples_exonic_variant_stats.tsv')
 def produce_variant_stats_table(infiles, table_file):
     """ produce a table of per-sample counts of different type of exonic variants """
-    # split the input files per task
-    sample_no = len(infiles)/2
-    raw_variant_files = infiles[0:sample_no]
-    rare_variant_files = infiles[sample_no:]
 
-    out = open(table_file,'w')    
-    out.write('sample\traw_exonic\trare_exonic\traw_synonymous\trare_synonymous\n')
+    var_types=['splicing','UTR3','UTR5','intronic','intergenic','exonic']
+    
+    # split the input files per task
+    sample_no = len(infiles)/3
+    raw_variant_files = infiles[0:sample_no]
+    kg1_filtered_variant_files = infiles[sample_no:sample_no*2]
+    inhouse_filtered_variant_files = infiles[sample_no*2:sample_no*3]
+
+    out = open(table_file,'w')
+   
+    import itertools
+    #header = ['sample'] + ['raw_'+t for t in var_types] + ['rare_'+t for t in var_types] + ['raw_synonymous','rare_synonymous']
+    filtering_stages = ['raw_','kg1_','inhouse_']
+    header = ['sample'] + \
+            [f+t for (f,t) in itertools.product(filtering_stages, var_types)] + \
+            [s+'_synonymous' for s in filtering_stages]
+    out.write(('\t'.join(header))+'\n')
     for i in range(0,sample_no):
         out.write(os.path.basename(raw_variant_files[i][0]).split('.')[0])
-        for fname in [raw_variant_files[i][0], rare_variant_files[i][2]]: # exonic variant stats of raw variants and rare variants
+        for fname in [raw_variant_files[i][0], kg1_filtered_variant_files[i][0], \
+                        inhouse_filtered_variant_files[i][0]]: # exonic variant stats of raw variants and rare variants
+            counts = dict.fromkeys(var_types,'0')
             f=open(fname)        
             for l in f.xreadlines():
-                if l.find("exonic")>0:
-                    out.write('\t'+l.split()[0])
-                    break
+                for var_type in var_types:
+                    if l.find(' '+var_type)>0:
+                        counts[var_type] = l.split()[0]
+                        break
+            out.write('\t'+'\t'.join([counts[t] for t in var_types]))
             f.close()
-        for fname in [raw_variant_files[i][1], rare_variant_files[i][3]]: # synonymous variants stats of raw and rare variants
+
+        for fname in [raw_variant_files[i][1], kg1_filtered_variant_files[i][1], \
+                        inhouse_filtered_variant_files[i][1]]: # synonymous variants stats of raw and rare variants
             f=open(fname)
+            found=False
             for l in f.xreadlines():
                 if l.find(" synonymous")>0:
+                    found=True
                     out.write('\t'+l.split()[0])
-                    break            
+                    break     
+            if not found: out.write('\t0')       
             f.close()
         out.write('\n')
     out.close()
