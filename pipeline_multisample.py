@@ -798,6 +798,57 @@ def genotype_gvcfs(gvcfs, output):
     run_cmd(cmd)
 
 
+#
+#
+# Genotyping mtDNA
+#
+
+
+@transform(recalibrate_baseq2, suffix('.gatk.bam'), '.mt.gvcf')
+def call_mt_haplotypes(bam, output_gvcf):
+    """Perform variant calling using GATK HaplotypeCaller"""
+    cmd = "nice %s -Xmx6g -jar %s \
+            -T HaplotypeCaller \
+            -R %s \
+            -I %s \
+            -o %s \
+            --emitRefConfidence GVCF \
+            --variant_index_type LINEAR \
+            --variant_index_parameter 128000 \
+            -minPruning 4 \
+            -L MT \
+            --dbsnp %s " % (java_with_params, gatk, reference, bam, output_gvcf, dbsnp)
+    run_cmd(cmd)
+
+@merge(call_mt_haplotypes, 'multisample.gatk.mt.gvcf')
+def merge_mt_gvcfs(gvcfs, merged_gvcf):
+    """Combine the per-sample GVCF files into one project-wide GVCF""" 
+    cmd = "nice %s -Xmx4g -jar %s -T CombineGVCFs \
+            -R %s -o %s" % (java_with_params, gatk, reference, merged_gvcf)
+       
+    for gvcf in gvcfs:
+        cmd = cmd + " --variant {}".format(gvcf)
+    
+    cmd = cmd + '&> {}.log'.format(merged_gvcf)
+    run_cmd(cmd)
+    
+@merge([merge_mt_gvcfs], 'multisample.gatk.mt.vcf')
+def genotype_mt_gvcfs(gvcfs, output):
+    """ Genotype this project's merged GVCF together with other project-wide GVCF files (provided in settings) """
+    cmd = "nice %s -Xmx8g -jar %s -T GenotypeGVCFs \
+            -R %s -o %s -nt %s" % (java_with_params, gatk, reference, output, options.jobs)
+
+    # if there are any external gvcfs to call with, include them
+    for gvcf in gvcfs:
+        cmd = cmd + " --variant {}".format(gvcf)
+
+    cmd = cmd + '&> {}.log'.format(output)
+    run_cmd(cmd)
+
+
+
+
+
 
 #
 #
@@ -973,8 +1024,10 @@ def final_calls(vcf, output):
 
 def split_snp_parameters():
     exome_vcf = 'multisample.gatk.analysisReady.exome.vcf'
+    mtdna_vcf = 'multisample.gatk.mt.vcf'
     for s_id in get_sample_ids():
         yield [exome_vcf, s_id + '/' + s_id + '.exome.vcf', s_id]
+        yield [mtdna_vcf, s_id + '/' + s_id + '.mt.vcf', s_id]
 
 def cleanup_files():
     run_cmd("rm -rf */*.recal_data.csv */*.realign* */*.dedup* */*.log *.log \
