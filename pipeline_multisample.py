@@ -637,7 +637,7 @@ def qc_gatk_bam_alignment_metrics(input_bam, output):
 def qc_gatk_bam_coverage_metrics(input_bam, output, output_format):
     bam_coverage_metrics(input_bam, output_format)
 
-@transform(recalibrate_baseq2, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{path[0]}/qc/qualimap/{SAMPLE_ID[0]}')
+@transform(recalibrate_baseq2, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{subpath[0][1]}/qc/qualimap/{SAMPLE_ID[0]}')
 def qc_gatk_bam_qualimap_report(input_bam, output_dir):
     qualimap_bam(input_bam, output_dir)
 
