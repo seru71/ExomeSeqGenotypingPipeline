@@ -154,11 +154,26 @@ if __name__ == '__main__':
 
     config = ConfigParser.ConfigParser()
     config.read(options.pipeline_settings)
-    # inputs 
-    input_bams = config.get('Inputs','input-bams')
+
+    # Root dirs
+    data_root = config.get('Docker','data-root')
+    reference_root = config.get('Docker','reference-root')
+    results_root = config.get('Docker','results-root')
+    
+    # Docker executable and args
+    docker_bin = config.get('Docker','docker-binary')
+    docker_args = config.get('Docker', 'docker-args')
+    docker_args += " -v " + ":".join(data_root,data_root,"ro")
+    docker_args += " -v " + ":".join(reference_root,reference_root,"ro")
+    docker_args += " -v " + ":".join(results_root,results_root,"rw")
+    docker = " ".join(docker_bin, docker_args) 
+    
+    # Inputs 
+    input_bams = os.path.join(data_root, config.get('Inputs','input-bams'))
+    
     # variant calls from other projects to call together with (semicolon separated list)
     try: 
-        call_with_gvcfs = [ path.strip() for path in config.get('Inputs','call-with-gvcfs').split(";") ]
+        call_with_gvcfs = [ os.path.join(reference_root, path.strip()) for path in config.get('Inputs','call-with-gvcfs').split(";") ]
 	#print 'Calling will be done together with:'
 	#for p in call_with_gvcfs:
 	#	print '\t',p
@@ -166,25 +181,23 @@ if __name__ == '__main__':
         call_with_gvcfs = [] 
     
     # reference files
-    reference = config.get('Resources','reference-genome')
-    dbsnp = config.get('Resources','dbsnp-vcf')
-    hapmap = config.get('Resources','hapmap-vcf')
-    omni = config.get('Resources','1000genomes-omni-vcf')
-    snps_1kg = config.get('Resources','1000genomes-snps-vcf')
-    indels_1kg = config.get('Resources','1000genomes-indels-vcf')
-    mills = config.get('Resources','mills-indels-vcf')
-    capture = config.get('Resources','capture-regions-bed')
-    capture_qualimap = config.get('Resources','capture-regions-bed-for-qualimap')
-    exome = config.get('Resources', 'exome-regions-bed')
+    reference = os.path.join(reference_root, config.get('Resources','reference-genome'))
+    dbsnp = os.path.join(reference_root, config.get('Resources','dbsnp-vcf'))
+    hapmap = os.path.join(reference_root, config.get('Resources','hapmap-vcf'))
+    omni = os.path.join(reference_root, config.get('Resources','1000genomes-omni-vcf'))
+    snps_1kg = os.path.join(reference_root, config.get('Resources','1000genomes-snps-vcf'))
+    indels_1kg = os.path.join(reference_root, config.get('Resources','1000genomes-indels-vcf'))
+    mills = os.path.join(reference_root, config.get('Resources','mills-indels-vcf'))
+    capture = os.path.join(reference_root, config.get('Resources','capture-regions-bed'))
+    capture_qualimap = os.path.join(reference_root, config.get('Resources','capture-regions-bed-for-qualimap'))
+    exome = os.path.join(reference_root, config.get('Resources', 'exome-regions-bed'))
+    
     # tools 
-    java = config.get('Tools','java-binary')
-    java_with_params = java
-    picard = config.get('Tools','picard-tools-path')
+    bwa = config.get('Tools','bwa')
+    picard = config.get('Tools','picard-tools')
     qualimap = config.get('Tools','qualimap')
-    gatk = config.get('Tools','gatk-jar')
+    gatk = config.get('Tools','gatk')
     vcftools = config.get('Tools','vcftools')
-    # other
-    n_cpus = config.getint('Other','n-cpus')
 
 
 
@@ -297,46 +310,6 @@ def qualimap_bam(input_bam, output_dir):
                 dir=output_dir))
 
     
-    
-#
-#
-# The two functions below seem redundant
-#
-#    
-#            
-#def merge_indel_and_snp_vcf(snp,indel, output):
-#    """Merges vcf files from the batch run"""
-#    run_cmd("{java} -Xmx4g -jar {gatk} \
-#            -R {reference} \
-#            -T CombineVariants \
-#            -V:SNP {snp} \
-#            -V:INDEL {indel} \
-#            -o {output}".format(
-#                java=java,
-#                gatk=gatk,
-#                reference=reference,
-#                snp=snp,
-#                indel=indel,
-#                output=output
-#            )) 
-#
-#def variant_annotator(bam, vcf, output):
-#    run_cmd("{java} -Xmx16g -jar {gatk} \
-#            -R {reference} \
-#            -T VariantAnnotator \
-#            -I {bam} \
-#            -o {output} \
-#            -A Coverage \
-#            --variant {vcf} \
-#            --dbsnp {dbsnp} \
-#            ".format(java=java, gatk=gatk,
-#                bam=bam,
-#                reference=reference,
-#                output=output,
-#                vcf=vcf,
-#                dbsnp=dbsnp
-#            )) 
-
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 
@@ -551,9 +524,8 @@ def find_realignment_intervals(foo, intervals, input_bam):
              -R %s \
              -known %s \
              -known %s \
-             -o %s \
-             -nt %d" 
-             % (java, gatk, input_bam, reference, indels_1kg, mills, intervals, n_cpus))
+             -o %s" 
+             % (java, gatk, input_bam, reference, indels_1kg, mills, intervals))
 
 
 #@follows(find_realignment_intervals)
@@ -581,9 +553,8 @@ def recalibrate_baseq1(input_bam, output):
             -R %s \
             -knownSites %s \
             -I %s \
-            -o %s \
-            -nct %d"
-            % (java_with_params, gatk, reference, dbsnp, input_bam, output, n_cpus))
+            -o %s"
+            % (java_with_params, gatk, reference, dbsnp, input_bam, output))
     
 
 # This custom check ensures that the recalibrate_baseq2 step is not run in --rebuild_mode if the .gatk.bam exists
@@ -608,9 +579,8 @@ def recalibrate_baseq2(inputs, output_bam):
             -R %s \
             -I %s \
             --out %s \
-            -BQSR %s \
-            -nct %d" 
-            % (java_with_params, gatk, reference, bam, output_bam, recal_data, n_cpus) )
+            -BQSR %s" 
+            % (java_with_params, gatk, reference, bam, output_bam, recal_data) )
   
     # remove(inputs[0])
 
