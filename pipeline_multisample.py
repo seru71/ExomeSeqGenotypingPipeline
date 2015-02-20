@@ -178,7 +178,7 @@ if __name__ == '__main__':
     exome = config.get('Resources', 'exome-regions-bed')
     # tools 
     java = config.get('Tools','java-binary')
-    java_with_params = java+' -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp'
+    java_with_params = java
     picard = config.get('Tools','picard-tools-path')
     qualimap = config.get('Tools','qualimap')
     gatk = config.get('Tools','gatk-jar')
