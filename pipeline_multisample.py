@@ -3,7 +3,6 @@
 
     pipeline_multisample.py
                         [--bamdir PATH]
-                        [--groups INT]
                         [--log_file PATH]
                         [--verbose]
                         [--target_tasks]
@@ -31,19 +30,12 @@ if __name__ == '__main__':
     from optparse import OptionParser
     import StringIO
 
-    parser = OptionParser(version="%prog 1.0", usage = "\n\n    %prog --settings PIPELINE_SETTINGS.CFG --groups NUMBER [more_options]")
+    parser = OptionParser(version="%prog 1.0", usage = "\n\n    %prog --settings PIPELINE_SETTINGS.CFG --target_task TASK [more_options]")
     parser.add_option("-s", "--settings", dest="pipeline_settings",
                         metavar="FILE",
                         type="string",
                         help="File containing all the settings for the analysis.")                  
                             
-    parser.add_option("-g", "--groups", dest="groups",
-                        type="int",
-                        default=1,
-                        help="Split dataset into smaller groups for multisample snp caling.")
-
-
-
     #
     #   general options: verbosity / logging
     #
@@ -163,10 +155,10 @@ if __name__ == '__main__':
     # Docker executable and args
     docker_bin = config.get('Docker','docker-binary')
     docker_args = config.get('Docker', 'docker-args')
-    docker_args += " -v " + ":".join(data_root,data_root,"ro")
-    docker_args += " -v " + ":".join(reference_root,reference_root,"ro")
-    docker_args += " -v " + ":".join(results_root,results_root,"rw")
-    docker = " ".join(docker_bin, docker_args) 
+    docker_args += " -v " + ":".join([data_root,data_root,"ro"])
+    docker_args += " -v " + ":".join([reference_root,reference_root,"ro"])
+    docker_args += " -v " + ":".join([results_root,results_root,"rw"])
+    docker = " ".join([docker_bin, docker_args]) 
     
     # Inputs 
     input_bams = os.path.join(data_root, config.get('Inputs','input-bams'))
@@ -201,42 +193,52 @@ if __name__ == '__main__':
 
 
 
+#88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
+
+#  Common functions 
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 
-#   imports
+import drmaa
+drmaa_session = drmaa.Session()
+drmaa_session.initialize()
+
+from ruffus.drmaa_wrapper import run_job, error_drmaa_job
+
+def run_cmd(cmd, run_locally=True):
+    stdout, stderr = '', ''
+    try:
+        #stdout, stderr = run_job(cmd, run_locally)
+        stdout, stderr = run_job(cmd, 
+                                 run_locally = run_locally, 
+                                 retain_job_scripts = True, job_script_directory = 'drmaa/',
+                                 drmaa_session = drmaa_session)
+        
+    except error_drmaa_job as err:
+        raise Exception("\n".join(map(str, ["Failed to run:", cmd, err, stdout, stderr])))
+    
+#
+#import resource
+#def setlimits():
+#    """Set maximum meomory to be used by a child process"""
+#    resource.setrlimit(resource.RLIMIT_AS, (100000000000,100000000000))
+#
+
+#import subprocess    
+#def run_cmd(cmd_str):
+#    """
+#    Throw exception if run command fails
+#    """
+#    process = subprocess.Popen(cmd_str, stdout = subprocess.PIPE,
+#                                stderr = subprocess.PIPE, shell = True, preexec_fn=setlimits)
+#    stdout_str, stderr_str = process.communicate()
+#    if process.returncode != 0:
+#        raise Exception("Failed to run '%s'\n%s%sNon-zero exit status %s" %
+#                            (cmd_str, stdout_str, stderr_str, process.returncode))
 
 
-#88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 
-from ruffus import *
-import subprocess
-# import drmaa
-import resource
-
-#88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
-
-#   Functions 
-
-
-#88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
-
-
-def setlimits():
-    """Set maximum meomory to be used by a child process"""
-    resource.setrlimit(resource.RLIMIT_AS, (100000000000,100000000000))
-
-def run_cmd(cmd_str):
-    """
-    Throw exception if run command fails
-    """
-    process = subprocess.Popen(cmd_str, stdout = subprocess.PIPE,
-                                stderr = subprocess.PIPE, shell = True, preexec_fn=setlimits)
-    stdout_str, stderr_str = process.communicate()
-    if process.returncode != 0:
-        raise Exception("Failed to run '%s'\n%s%sNon-zero exit status %s" %
-                            (cmd_str, stdout_str, stderr_str, process.returncode))
 
 def rename(old_file, new_file):
     """rename file"""
@@ -396,6 +398,8 @@ if __name__ == '__main__':
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
+
+from ruffus import *
 
 #       Put pipeline code here
 
@@ -697,22 +701,9 @@ def call_variants(infiles, output):
         remove(batch)
         remove(batch + '.idx')
 
-
-# @follows('call_variants')
-# @files('multisample.gatk.vcf', ['multisample.gatk.snp.vcf','multisample.gatk.indel.vcf'])
-# def split_snps_and_indels(vcf, outputs):
-#     """Separates the vcf file into only snp calls"""
-#    run_cmd("{} -Xmx2g -jar {} -R {} -T SelectVariants \
-#            --variant {} -selectType SNP\
-#            -o {}".format(java, gatk,reference,vcf, outputs[0]))
-#    run_cmd("{} -Xmx2g -jar {} -R {} -T SelectVariants \
-#            --variant {} -selectType INDEL\
-#            -o {}".format(java, gatk,reference,vcf,outputs[1]))
-
-
 #
 #
-# Ganotyping using HaplotypeCaller
+# Genotyping using HaplotypeCaller
 #
 
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.gvcf')
@@ -1053,11 +1044,14 @@ if __name__ == '__main__':
                                     options.forced_tasks,
                                         gnu_make_maximal_rebuild_mode = options.rebuild_mode,
                                     no_key_legend   = not options.key_legend_in_graph)
-    else:
+    else:        
         pipeline_run(options.target_tasks, options.forced_tasks,
-                            multiprocess    = options.jobs,
+                            multithread     = options.jobs,
                             logger          = stderr_logger,
                             verbose         = options.verbose,
                             gnu_make_maximal_rebuild_mode = options.rebuild_mode,
                             checksum_level  = 0)
-
+    
+        
+    drmaa_session.exit()
+    
