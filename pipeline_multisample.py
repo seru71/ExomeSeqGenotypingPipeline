@@ -2,7 +2,7 @@
 """
 
     pipeline_multisample.py
-                        [--bamdir PATH]
+                        [--settings PATH]
                         [--log_file PATH]
                         [--verbose]
                         [--target_tasks]
@@ -157,7 +157,9 @@ if __name__ == '__main__':
     docker_args = config.get('Docker', 'docker-args')
     docker_args += " -v " + ":".join([data_root,data_root,"ro"])
     docker_args += " -v " + ":".join([reference_root,reference_root,"ro"])
-    docker_args += " -v " + ":".join([results_root,results_root,"rw"])
+    cwd = os.getcwd()
+    docker_args += " -v " + ":".join([cwd,cwd,"rw"])
+    docker_args += " -w " + cwd
     docker = " ".join([docker_bin, docker_args]) 
     
     # Inputs 
@@ -166,9 +168,9 @@ if __name__ == '__main__':
     # variant calls from other projects to call together with (semicolon separated list)
     try: 
         call_with_gvcfs = [ os.path.join(reference_root, path.strip()) for path in config.get('Inputs','call-with-gvcfs').split(";") ]
-	#print 'Calling will be done together with:'
-	#for p in call_with_gvcfs:
-	#	print '\t',p
+        #print 'Calling will be done together with:'
+        #for p in call_with_gvcfs:
+        #	print '\t',p
     except (ConfigParser.NoOptionError): 
         call_with_gvcfs = [] 
     
@@ -186,12 +188,14 @@ if __name__ == '__main__':
     
     # tools 
     bwa = config.get('Tools','bwa')
+    samtools = config.get('Tools','samtools')
     picard = config.get('Tools','picard-tools')
     qualimap = config.get('Tools','qualimap')
     gatk = config.get('Tools','gatk')
     vcftools = config.get('Tools','vcftools')
 
-
+    # tmp dir
+    tmp_dir = config.get('Other','tmp-directory')
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 
@@ -206,39 +210,34 @@ drmaa_session.initialize()
 
 from ruffus.drmaa_wrapper import run_job, error_drmaa_job
 
-def run_cmd(cmd, run_locally=True):
+def _run_cmd(cmd, run_locally=False):
     stdout, stderr = '', ''
     try:
-        #stdout, stderr = run_job(cmd, run_locally)
         stdout, stderr = run_job(cmd, 
                                  run_locally = run_locally, 
                                  retain_job_scripts = True, job_script_directory = 'drmaa/',
                                  drmaa_session = drmaa_session)
-        
     except error_drmaa_job as err:
         raise Exception("\n".join(map(str, ["Failed to run:", cmd, err, stdout, stderr])))
     
-#
-#import resource
-#def setlimits():
-#    """Set maximum meomory to be used by a child process"""
-#    resource.setrlimit(resource.RLIMIT_AS, (100000000000,100000000000))
-#
+def run_cmd(cmd, args, interpreter_args=None, run_locally=False, dockerize=True):
+    
+    if dockerize:
 
-#import subprocess    
-#def run_cmd(cmd_str):
-#    """
-#    Throw exception if run command fails
-#    """
-#    process = subprocess.Popen(cmd_str, stdout = subprocess.PIPE,
-#                                stderr = subprocess.PIPE, shell = True, preexec_fn=setlimits)
-#    stdout_str, stderr_str = process.communicate()
-#    if process.returncode != 0:
-#        raise Exception("Failed to run '%s'\n%s%sNon-zero exit status %s" %
-#                            (cmd_str, stdout_str, stderr_str, process.returncode))
+        if interpreter_args==None or interpreter_args.strip()=="":
+            full_cmd = "{docker} {cmd} {args}".format(docker=docker,cmd=cmd,args=args)
+        else:
+            full_cmd = "{docker} {cmd} \"{args}\" \"{iargs}\" \
+                    ".format(docker=docker, cmd=cmd, args=args, iargs=interpreter_args)
+    else: 
+        
+        if interpreter_args==None or interpreter_args.strip()=="":
+            full_cmd = "{cmd} {args}".format(cmd=cmd, args=args)
+        else:
+            raise Exception('Not implemented interpreter args in not-dockerized execution.\nWhy would you want to do it anyway?')
+            #full_cmd = "{cmd} \"{args}\" \"{iargs}\"".format(cmd=cmd, args=args, iargs=interpreter_args)
 
-
-
+    _run_cmd(full_cmd, run_locally)
 
 def rename(old_file, new_file):
     """rename file"""
@@ -250,50 +249,43 @@ def remove(f):
                             
 def index_bam(bam):
     """Use samtools to create an index for the bam file"""
-    run_cmd('samtools index %s' % bam)
+    run_cmd(samtools, "index %s" % bam)
                           
 def bam_quality_score_distribution(bam,qs,pdf):
     """Calculates quality score distribution histograms"""
-    run_cmd("java -jar {picard}/QualityScoreDistribution.jar \
-             CHART_OUTPUT={chart} \
-             OUTPUT={output} \
-             INPUT={bam} \
-             VALIDATION_STRINGENCY=SILENT".format(
-                 picard=picard,
-                 chart=pdf,
-                 output=qs,
-                 bam=bam
-             ))
+    run_cmd(picard, 
+                       "QualityScoreDistribution \
+                        CHART_OUTPUT={chart} \
+                        OUTPUT={out} \
+                        INPUT={bam} \
+                        VALIDATION_STRINGENCY=SILENT \
+                        ".format(chart=pdf, out=qs, bam=bam))
 
 def bam_alignment_metrics(bam,metrics):
     """Collects alignment metrics for a bam file"""
-    run_cmd("java -jar {picard}/CollectAlignmentSummaryMetrics.jar \
-             REFERENCE_SEQUENCE={reference} \
-             OUTPUT={output} \
-             INPUT={bam} \
-             VALIDATION_STRINGENCY=SILENT".format(
-                 picard=picard,
-                 reference=reference,
-                 output=metrics,
-                 bam=bam
-             ))
+    run_cmd(picard, 
+                       "CollectAlignmentSummaryMetrics \
+                        REFERENCE_SEQUENCE={ref} \
+                        OUTPUT={out} \
+                        INPUT={bam} \
+                        VALIDATION_STRINGENCY=SILENT \
+                        ".format(ref=reference, out=metrics, bam=bam))
     
 def bam_coverage_metrics(input_bam, output):
     """ Calculates and outputs bam coverage statistics """
-    run_cmd("{java} -Xmx4g -jar {gatk} \
-            -R {reference} \
-            -T DepthOfCoverage \
-            -o {output} \
-            -I {input} \
-            -L {capture} \
-            -ct 8 -ct 20 -ct 30 \
-            --omitDepthOutputAtEachBase --omitLocusTable \
-            ".format(java=java, gatk=gatk,
-                reference=reference,
-                output=output,
-                input=input_bam,
-                capture=capture
-            ))
+    run_cmd(gatk,
+                       "-R {reference} \
+                        -T DepthOfCoverage \
+                        -o {output} \
+                        -I {input} \
+                        -L {capture} \
+                        -ct 8 -ct 20 -ct 30 \
+                        --omitDepthOutputAtEachBase --omitLocusTable \
+                        ".format(reference=reference,
+                                 output=output,
+                                 input=input_bam,
+                                 capture=capture), 
+                       "-Xmx4g")
 
 def qualimap_bam(input_bam, output_dir):
     """ Generates Qualimap bam QC report """
@@ -301,15 +293,15 @@ def qualimap_bam(input_bam, output_dir):
     if not os.path.exists('qc'): os.mkdir('qc')
     if not os.path.exists('qc/qualimap/'): os.mkdir('qc/qualimap')
     if not os.path.exists(output_dir): os.mkdir(output_dir)
-    run_cmd("{qualimap} bamqc -bam {bam} \
-             -c -outformat PDF \
-             -gff {target} \
-             -gd HUMAN -os \
-             -outdir {dir} &> {dir}/qualimap.err".format(
-                qualimap=qualimap,
-                bam=input_bam,
-                target=capture_qualimap,
-                dir=output_dir))
+    run_cmd(qualimap,
+                       "bamqc -bam {bam} \
+                       -c -outformat PDF \
+                       -gff {target} \
+                       -gd HUMAN -os \
+                       -outdir {dir} &> {dir}/qualimap.err \
+                       ".format(bam=input_bam,
+                                target=capture_qualimap,
+                                dir=output_dir))
 
     
 
@@ -401,7 +393,7 @@ if __name__ == '__main__':
 
 from ruffus import *
 
-#       Put pipeline code here
+
 
 def get_sample_ids():
     files = glob.glob(input_bams)
@@ -436,7 +428,7 @@ def link(none, bam, extra):
 #@follows(link)
 @transform(link, suffix(".bam"), '.bam.bai')
 def index(bam, output):
-    """create bam index"""
+    """Create raw bam index"""
     index_bam(bam)
 
 
@@ -484,29 +476,36 @@ def raw_bam_qc():
 
 def dup_removal_picard(bam,output):
     """Use Picard to remove duplicates"""
-    run_cmd('%s -Xmx4096m -jar %s/CleanSam.jar \
-             INPUT=%s \
-             OUTPUT=%s \
-             VALIDATION_STRINGENCY=LENIENT VERBOSITY=ERROR CREATE_INDEX=TRUE' 
-             % (java, picard, bam, output))
+    run_cmd(picard, 
+                       "CleanSam \
+                        INPUT={bam} \
+                        OUTPUT={out} \
+                        VALIDATION_STRINGENCY=LENIENT \
+                        VERBOSITY=ERROR CREATE_INDEX=TRUE \
+                        ".format(bam=bam, 
+                                 out=output),
+                        "-Xmx4g")
    
 def dup_mark_picard(bam,output):
     """Use Picard to mark duplicates"""
-    run_cmd('%s -Xmx4096m -jar %s/MarkDuplicates.jar \
-            TMP_DIR=/export/astrakanfs/stefanj/tmp \
+    args = "MarkDuplicates \
+            TMP_DIR={tmp} \
             REMOVE_DUPLICATES=true \
-            INPUT=%s \
-            OUTPUT=%s \
-            METRICS_FILE=%s.dup_metrics \
-            VALIDATION_STRINGENCY=LENIENT VERBOSITY=ERROR CREATE_INDEX=true'
-            % (java, picard, bam, output, bam))
+            INPUT={bam} \
+            OUTPUT={out} \
+            METRICS_FILE={bam}.dup_metrics \
+            VALIDATION_STRINGENCY=LENIENT VERBOSITY=ERROR CREATE_INDEX=true \
+            ".format(tmp=tmp_dir, 
+                     bam=bam, 
+                     out=output)
+    run_cmd(picard,args,"-Xmx4g")
 
 
 @follows(index)
 @transform(link, suffix(".bam"), '.dedup.bam')
 def remove_dups(bam, output):
-    """Use samtools for dupremoval"""
-    #run_cmd('samtools rmdup %s %s' % (bam,output))
+    """Mark duplicates"""
+    #run_cmd(samtools,"rmdup %s %s" % (bam,output))
     dup_mark_picard(bam, output)
     # remove(input)
 
@@ -514,37 +513,44 @@ def remove_dups(bam, output):
 #@follows(remove_dups)
 @transform(remove_dups, suffix(".dedup.bam"), '.dedup.bam.bai')
 def index_dups(bam, output):
-    """create bam index"""
+    """Create bam index"""
     index_bam(bam)
 
 
 #@follows(index_dups)
 @transform(index_dups, suffix(".dedup.bam.bai"), '.realign.intervals', r'\1.dedup.bam')
 def find_realignment_intervals(foo, intervals, input_bam):
-    
-    run_cmd("%s -Djava.io.tmpdir=/export/astrakanfs/stefanj/tmp -Xmx4g -jar %s \
-             -T RealignerTargetCreator \
-             -I %s \
-             -R %s \
-             -known %s \
-             -known %s \
-             -o %s" 
-             % (java, gatk, input_bam, reference, indels_1kg, mills, intervals))
+    """ Generate realignment intervals """
+    args = "-T RealignerTargetCreator \
+            -I {bam} \
+            -R {reference} \
+            -known {indels1} \
+            -known {indels2} \
+            -o {out}".format(bam=input_bam, 
+                             reference=reference, 
+                             indels1=indels_1kg, 
+                             indels2=mills, 
+                             out=intervals)
+    run_cmd(gatk,args,"-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
 
 
 #@follows(find_realignment_intervals)
 @transform(find_realignment_intervals, suffix(".realign.intervals"), '.realigned.bam', r'\1.dedup.bam')
 def indel_realigner(intervals_file, realigned_bam, input_bam):
     """Re-aligns regions around indels"""
-    run_cmd("%s -Xmx4g -jar %s \
-             -T IndelRealigner \
-             -I %s \
-             -R %s \
-             -targetIntervals %s \
-             -known %s \
-             -known %s \
-             -o %s" 
-             % (java, gatk, input_bam, reference, intervals_file, indels_1kg, mills, realigned_bam))
+    args = "-T IndelRealigner \
+            -I {bam} \
+            -R {reference} \
+            -targetIntervals {intervals} \
+            -known indels1 \
+            -known indels2 \
+            -o {out}".format(bam=input_bam, 
+                             reference=reference, 
+                             intervals=intervals_file, 
+                             indels1=indels_1kg, 
+                             indels2=mills, 
+                             out=realigned_bam)
+    run_cmd(gatk,args,"-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
 
 
 #@follows(indel_realigner)
@@ -552,13 +558,15 @@ def indel_realigner(intervals_file, realigned_bam, input_bam):
 def recalibrate_baseq1(input_bam, output):
     """Base quality score recalibration in bam file - first pass """
     index_bam(input_bam)
-    run_cmd("%s -Xmx6g -jar %s \
-            -T BaseRecalibrator \
-            -R %s \
-            -knownSites %s \
-            -I %s \
-            -o %s"
-            % (java_with_params, gatk, reference, dbsnp, input_bam, output))
+    args = "-T BaseRecalibrator \
+           -R {reference} \
+           -knownSites {dbsnp} \
+           -I {bam} \
+           -o {out}".format(reference=reference, 
+                            dbsnp=dbsnp, 
+                            bam=input_bam, 
+                            out=output)
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
     
 
 # This custom check ensures that the recalibrate_baseq2 step is not run in --rebuild_mode if the .gatk.bam exists
@@ -578,14 +586,16 @@ def recalibrate_baseq2(inputs, output_bam):
         Part 2: rewrite quality scores into a new bam file"""   
     bam = inputs[0]
     recal_data = inputs[1]
-    run_cmd("%s -Xmx4g -jar %s \
-            -T PrintReads \
-            -R %s \
-            -I %s \
-            --out %s \
-            -BQSR %s" 
-            % (java_with_params, gatk, reference, bam, output_bam, recal_data) )
-  
+    args = "-T PrintReads \
+            -R {reference} \
+            -I {bam} \
+            --out {out} \
+            -BQSR {recal}".format(reference=reference, 
+                                  bam=bam, 
+                                  out=output_bam, 
+                                  recal=recal_data) 
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
+    
     # remove(inputs[0])
 
 
@@ -635,12 +645,11 @@ def gatk_bam_qc():
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.reduced.bam')
 def reduce_bam(bam, output):
     """Reduces the BAM file using read based compression that keeps only essential information for variant calling"""
-    run_cmd("%s -Xmx6g -jar %s \
-            -T ReduceReads \
+    args = "-T ReduceReads \
             -R %s \
             -I %s \
-            -o %s"
-            % (java_with_params, gatk, reference, bam, output))
+            -o %s" % (reference, bam, output)
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
 
 
 def split_seq(seq, num_pieces):
@@ -653,38 +662,36 @@ def split_seq(seq, num_pieces):
 
 def multisample_variant_call(bams, output):
     """Perform multi-sample variant calling using GATK"""
-    cmd = "nice %s -Xmx8g -jar %s \
-            -T UnifiedGenotyper \
-            -R %s \
-            -o %s \
+    args = "-T UnifiedGenotyper \
+            -R {} \
+            -o {} \
             -glm BOTH \
-            -nt %s \
-            --dbsnp %s " % (java_with_params, gatk, reference, output, options.jobs, dbsnp)
+            --dbsnp {} ".format(reference, output, dbsnp)
     for bam in bams:
-        cmd = cmd + '-I {} '.format(bam)
+        args = args + '-I {} '.format(bam)
     #log the results
-    cmd = cmd + '&> {}.log'.format(output)
-    run_cmd(cmd)
+    args = args + '&> {}.log'.format(output)
+    
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir)
     
 def merge_batch_vcf(vcfs, output):
     """Merges vcf files from the batch run"""
     if len(vcfs) == 1:
-        run_cmd('cp {vcf} {output}'.format(vcf = vcfs[0], output = output))
+        run_cmd('cp {vcf} {output}'.format(vcf = vcfs[0], output = output), run_locally=True)
     else:
         merging = ''
         for i in range(len(vcfs)):
             merging = merging + ' -V:batch{number} {file}'.format(number=i,file=vcfs[i])
-        run_cmd("{java} -Xmx4g -jar {gatk} \
-                -R {reference} \
-                -T CombineVariants \
-                -o {output} \
-                {files}".format(
-                    java=java,
-                    gatk=gatk,
-                    reference=reference,
-                    output=output,
-                    files=merging
-                )) 
+        run_cmd(gatk,
+                           "-R {reference} \
+                            -T CombineVariants \
+                            -o {output} \
+                            {files}".format(
+                                reference=reference,
+                                output=output,
+                                files=merging
+                                ),
+                           "-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir) 
 
 @merge(reduce_bam, 'multisample.gatk.vcf')
 def call_variants(infiles, output):
@@ -709,36 +716,39 @@ def call_variants(infiles, output):
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.gvcf')
 def call_haplotypes(bam, output_gvcf):
     """Perform variant calling using GATK HaplotypeCaller"""
-    cmd = "nice %s -Xmx6g -jar %s \
-            -T HaplotypeCaller \
-            -R %s \
-            -I %s \
-            -o %s \
+    args = "-T HaplotypeCaller \
+            -R {reference} \
+            -I {bam} \
+            -o {gvcf} \
             --emitRefConfidence GVCF \
             --variant_index_type LINEAR \
             --variant_index_parameter 128000 \
             -minPruning 4 \
-            -L %s \
-            --dbsnp %s " % (java_with_params, gatk, reference, bam, output_gvcf, exome, dbsnp)
-#             -nct %s \
-#             -stand_call_conf 50.0 \
+            -L {target} \
+            --dbsnp {dbsnp} \
+            ".format(reference=reference, 
+                     bam=bam, 
+                     gvcf=output_gvcf, 
+                     target=exome, 
+                     dbsnp=dbsnp)
 
     #log the results
     #cmd = cmd + '&> {}.log'.format(output_gvcf)
-    run_cmd(cmd)
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
 
 
 @merge(call_haplotypes, 'multisample.gatk.gvcf')
 def merge_gvcfs(gvcfs, merged_gvcf):
     """Combine the per-sample GVCF files into one project-wide GVCF""" 
-    cmd = "nice %s -Xmx4g -jar %s -T CombineGVCFs \
-            -R %s -o %s" % (java_with_params, gatk, reference, merged_gvcf)
+    args = "-T CombineGVCFs \
+            -R {reference} \
+            -o {out} ".format(reference=reference, out=merged_gvcf)
        
     for gvcf in gvcfs:
-        cmd = cmd + " --variant {}".format(gvcf)
+        args = args + " --variant {}".format(gvcf)
     
-    cmd = cmd + '&> {}.log'.format(merged_gvcf)
-    run_cmd(cmd)
+    args = args + '&> {}.log'.format(merged_gvcf)
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
     
 
 @originate(call_with_gvcfs)
@@ -748,15 +758,16 @@ def call_with_gvcfs_as_arguments_task(gvcfs):
 @merge([merge_gvcfs, call_with_gvcfs_as_arguments_task], 'multisample.gatk.vcf')
 def genotype_gvcfs(gvcfs, output):
     """ Genotype this project's merged GVCF together with other project-wide GVCF files (provided in settings) """
-    cmd = "nice %s -Xmx8g -jar %s -T GenotypeGVCFs \
-            -R %s -o %s -nt %s" % (java_with_params, gatk, reference, output, options.jobs)
+    args = "-T GenotypeGVCFs \
+            -R {reference} \
+            -o {out} ".format(reference=reference, out=output)
 
     # if there are any external gvcfs to call with, include them
     for gvcf in gvcfs:
-        cmd = cmd + " --variant {}".format(gvcf)
+        args = args + " --variant {}".format(gvcf)
 
-    cmd = cmd + '&> {}.log'.format(output)
-    run_cmd(cmd)
+    args = args + '&> {}.log'.format(output)
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir)
 
 
 #
@@ -768,7 +779,7 @@ def genotype_gvcfs(gvcfs, output):
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.mt.gvcf')
 def call_mt_haplotypes(bam, output_gvcf):
     """Perform variant calling using GATK HaplotypeCaller"""
-    cmd = "nice %s -Xmx6g -jar %s \
+    args = "nice %s -Xmx6g -jar %s \
             -T HaplotypeCaller \
             -R %s \
             -I %s \
@@ -778,33 +789,31 @@ def call_mt_haplotypes(bam, output_gvcf):
             --variant_index_parameter 128000 \
             -minPruning 4 \
             -L MT \
-            --dbsnp %s " % (java_with_params, gatk, reference, bam, output_gvcf, dbsnp)
-    run_cmd(cmd)
+            --dbsnp %s " % (reference, bam, output_gvcf, dbsnp)
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
 
 @merge(call_mt_haplotypes, 'multisample.gatk.mt.gvcf')
 def merge_mt_gvcfs(gvcfs, merged_gvcf):
     """Combine the per-sample GVCF files into one project-wide GVCF""" 
-    cmd = "nice %s -Xmx4g -jar %s -T CombineGVCFs \
-            -R %s -o %s" % (java_with_params, gatk, reference, merged_gvcf)
+    args = "-T CombineGVCFs -R %s -o %s" % (reference, merged_gvcf)
        
     for gvcf in gvcfs:
-        cmd = cmd + " --variant {}".format(gvcf)
+        args = args + " --variant {}".format(gvcf)
     
-    cmd = cmd + '&> {}.log'.format(merged_gvcf)
-    run_cmd(cmd)
+    args = args + '&> {}.log'.format(merged_gvcf)
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
     
 @merge([merge_mt_gvcfs], 'multisample.gatk.mt.vcf')
 def genotype_mt_gvcfs(gvcfs, output):
     """ Genotype this project's merged GVCF together with other project-wide GVCF files (provided in settings) """
-    cmd = "nice %s -Xmx8g -jar %s -T GenotypeGVCFs \
-            -R %s -o %s -nt %s" % (java_with_params, gatk, reference, output, options.jobs)
+    args = "-T GenotypeGVCFs -R %s -o %s " % (reference, output)
 
     # if there are any external gvcfs to call with, include them
     for gvcf in gvcfs:
-        cmd = cmd + " --variant {}".format(gvcf)
+        args = args + " --variant {}".format(gvcf)
 
-    cmd = cmd + '&> {}.log'.format(output)
-    run_cmd(cmd)
+    args = args + '&> {}.log'.format(output)
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir)
 
 
 
@@ -821,8 +830,7 @@ def genotype_mt_gvcfs(gvcfs, output):
 @files('multisample.gatk.vcf', ['multisample.gatk.snp.model','multisample.gatk.snp.model.tranches'])
 def find_snp_tranches_for_recalibration(vcf,outputs):
     """Runs VariantRecalibrator on snps"""
-    cmd = "{java} -Xmx16g -jar {gatk} \
-            -T VariantRecalibrator \
+    args = "-T VariantRecalibrator \
             -R {reference}  \
             -input {input} \
             -resource:hapmap,known=false,training=true,truth=true,prior=15.0 {hapmap} \
@@ -835,8 +843,6 @@ def find_snp_tranches_for_recalibration(vcf,outputs):
             -tranchesFile {tranches} \
             -rscriptFile {plots}\
             -nt {num_jobs}".format(
-                java=java_with_params,
-                gatk=gatk,
                 reference=reference,
                 hapmap=hapmap,
                 omni=omni,
@@ -846,19 +852,19 @@ def find_snp_tranches_for_recalibration(vcf,outputs):
                 output=outputs[0],
                 tranches=outputs[1],
                 plots=outputs[0]+'.plots.R',
-                num_jobs=options.jobs
-            )
+                num_jobs=options.jobs)
+            
     if get_num_files() > 10:
-        cmd += " -an InbreedingCoeff"
-    run_cmd(cmd)
+        args += " -an InbreedingCoeff"
+        
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir)
 
 
 @follows(find_snp_tranches_for_recalibration)
 @files('multisample.gatk.vcf', ['multisample.gatk.indel.model','multisample.gatk.indel.model.tranches'])
 def find_indel_tranches_for_recalibration(vcf,outputs):
     """Runs VariantRecalibrator on indels"""
-    cmd = "{java} -Xmx16g -jar {gatk} \
-            -T VariantRecalibrator \
+    args = "-T VariantRecalibrator \
             -R {reference}  \
             -input {input} \
             --maxGaussians 4 \
@@ -870,8 +876,6 @@ def find_indel_tranches_for_recalibration(vcf,outputs):
             -tranchesFile {tranches} \
             -rscriptFile {plots}\
             -nt {num_jobs}".format(
-                java=java_with_params,
-                gatk=gatk,
                 reference=reference,
                 mills=mills,
                 dbsnp=dbsnp,
@@ -882,14 +886,14 @@ def find_indel_tranches_for_recalibration(vcf,outputs):
                 num_jobs=options.jobs
             )
     if get_num_files() > 10:
-        cmd += " -an InbreedingCoeff"
-    run_cmd(cmd)
+        args += " -an InbreedingCoeff"
+        
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir)
 
 
 def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP'):
     """Apply the recalibration tranch file to either snps or indels (depending on mode=SNP or mode=INDEL"""
-    run_cmd("{java} -Xmx16g -jar {gatk} \
-            -T ApplyRecalibration \
+    args = "-T ApplyRecalibration \
             -R {reference} \
             -input {vcf} \
             --ts_filter_level 99.9 \
@@ -898,16 +902,16 @@ def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP'):
             -mode {mode} \
             -nt {num_jobs} \
             -o {output}".format(
-                java=java_with_params,
-                gatk=gatk,
                 reference=reference,
                 vcf=vcf,
                 tranches=tranches,
                 recal=recal,
                 mode=mode,
                 num_jobs=options.jobs,
-                output=output
-            ))
+                output=output)
+            
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir)
+
 
 
 @follows(find_indel_tranches_for_recalibration)
@@ -930,22 +934,20 @@ def apply_recalibration_filter_indels(inputs,output):
 @transform(apply_recalibration_filter_indels, suffix('.preHardFiltering.vcf'), '.markedHardFiltering.vcf')
 def filter_variants(input_vcf, output_vcf):
     """docstring for apply_indel_filter"""
-    run_cmd('{java} -Xmx12g -jar {gatk} \
-            -T VariantFiltration \
+    args = "-T VariantFiltration \
             -o {output} \
             --variant {input} \
-            --filterExpression "QD < 3.0" \
-            --filterExpression "DP < 6" \
+            --filterExpression \"QD < 3.0\" \
+            --filterExpression \"DP < 6\" \
             --filterName QDFilter   \
             --filterName DPFilter   \
-            -R {reference}'.format(
-                java=java_with_params,
-                gatk=gatk,
+            -R {reference}".format(
                 output=output_vcf,
                 input=input_vcf,
-                reference=reference
-            ))
+                reference=reference)
+
     # remove(input)
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx12g" % tmp_dir)
 
 
 #@follows(filter_variants)
@@ -953,20 +955,18 @@ def filter_variants(input_vcf, output_vcf):
 @transform(filter_variants, suffix('.markedHardFiltering.vcf'), '.analysisReady.vcf')
 def remove_filtered(input_vcf, output_vcf):
     """Remove filtered variants"""
-    run_cmd("{java} -Xmx12g -jar {gatk} \
-            -T SelectVariants \
+    args = "-T SelectVariants \
             -R {reference} \
             --variant {input} \
             -o {output} \
             -env -ef".format(
-                java=java_with_params,
-                gatk=gatk,
                 reference=reference,
                 input=input_vcf,
-                output=output_vcf
-            ))
-    # remove(input)
+                output=output_vcf)
 
+    # remove(input)
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx12g" % tmp_dir)
+    
 
 #@follows(remove_filtered)
 @transform(remove_filtered, suffix('.analysisReady.vcf'),'.analysisReady.exome.vcf')
@@ -974,12 +974,13 @@ def final_calls(vcf, output):
     """ Produce the final variant calls in the exome regions """
     output = output[:-10]
     # apply filters to the vcf file to limit calling to exome region    
-    run_cmd("%s --vcf %s \
-             --out %s \
-             --recode \
-             --bed %s \
-             --keep-INFO-all"
-            % (vcftools, vcf, output, exome))
+    args = "--vcf {vcf} \
+            --out {out} \
+            --recode \
+            --bed {bed} \
+            --keep-INFO-all \
+            ".format(vcf=vcf, out=output, bed=exome)
+    run_cmd(vcftools, args)
     rename('multisample.gatk.analysisReady.recode.vcf','multisample.gatk.analysisReady.exome.vcf')
 
 
@@ -990,6 +991,7 @@ def split_snp_parameters():
         yield [exome_vcf, s_id + '/' + s_id + '.exome.vcf', s_id]
         yield [mtdna_vcf, s_id + '/' + s_id + '.mt.vcf', s_id]
 
+
 def cleanup_files():
     run_cmd("rm -rf */*.recal_data.csv */*.realign* */*.dedup* */*.log *.log \
             *.to_filter* multisample.gatk.snp.recal batch* \
@@ -997,8 +999,8 @@ def cleanup_files():
             multisample.gatk.indel.model.* multisample.gatk.snp.model.* \
             multisample.gatk.analysisReady.vcf.vcfidx \
             multisample.gatk.analysisReady.vcf.idx \
-            multisample.gatk.recalibratedSNPS.rawIndels.vcf.idx \
-            ")
+            multisample.gatk.recalibratedSNPS.rawIndels.vcf.idx",
+            run_locally=True)
 #            multisample.gatk.analysisReady.vcf \
 
 
@@ -1010,16 +1012,20 @@ def split_snps(vcf, output, sample):
     AD_threshold=5
     DP_threshold=8
     # what if there is multiple alt alleles??? is the first one most covered      
-    run_cmd("{java} -Xmx2g -jar {gatk} -R {ref} \
-            -T SelectVariants \
+    args = "-T SelectVariants \
+            -R {ref} \
             --variant {vcf} \
             -sn {sample} \
             -select 'vc.getGenotype(\"{sample}\").getAD().1 >= {ad_thr} && vc.getGenotype(\"{sample}\").getDP() >= {dp_thr}' \
             -o {out} \
-            ".format(java=java_with_params, gatk=gatk, ref=reference, 
-                vcf=vcf, sample=sample, out=output, 
-                ad_thr=AD_threshold, 
-                dp_thr=DP_threshold))
+            ".format(ref=reference,
+                     vcf=vcf, 
+                     sample=sample, 
+                     out=output, 
+                     ad_thr=AD_threshold, 
+                     dp_thr=DP_threshold)
+            
+    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx2g" % tmp_dir)
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
