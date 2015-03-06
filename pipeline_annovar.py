@@ -543,7 +543,9 @@ def count_hetz_and_homz_per_chr(infiles, table_files):
     # any other order should trigger an exception
     chromosomes = ['1','2','3','4','5','6','7','8','9',
                    '10','11','12','13','14','15','16','17','18','19',
-                   '20','21','22','X','Y','GL000209.1']
+                   '20','21','22','X','Y','MT',
+                   'GL000191.1', 'GL000228.1', 'GL000209.1',  
+                   'GL000223.1','GL000222.1', 'GL000194.1']
 
     hetz = open(table_files[0], 'w')
     homz = open(table_files[1], 'w')
