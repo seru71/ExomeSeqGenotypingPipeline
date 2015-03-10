@@ -186,7 +186,11 @@ if __name__ == '__main__':
     capture_qualimap = os.path.join(reference_root, config.get('Resources','capture-regions-bed-for-qualimap'))
     exome = os.path.join(reference_root, config.get('Resources', 'exome-regions-bed'))
     
-    # tools 
+    adapters = os.path.join(reference_root, config.get('Resources', 'adapters-fasta'))
+    
+    # tools
+    bcl2fastq = config.get('Tools','bcl2fastq')
+    trimmomatic = config.get('Tools', 'trimmomatic') 
     bwa = config.get('Tools','bwa')
     samtools = config.get('Tools','samtools')
     picard = config.get('Tools','picard-tools')
@@ -411,6 +415,82 @@ def generate_parameters():
 def get_num_files():
     files = glob.glob(input_bams)
     return len(files)
+
+#
+# Preprocess the reads
+#
+@subdivide(generate_parameters, formatter(), '*', '*')
+def convert_bcl_to_fastq(bcls, fastqs):
+    pass
+    #
+    # run bcl2fastq and populate fastq.gz files
+    # the output should be a list of individual (not paired) fastq files
+    # can we control the paths here?
+    #
+    
+    
+    
+#
+# Input FASTQ filenames are expected to have following format:
+#    [SAMPLE_ID]_[LANE_ID]_[R1|R2]_001.fastq.gz
+# In this step, the two FASTQ files matching on the [SAMPLE_ID]_[LANE_ID] will be trimmed together (R1 and R2). 
+# The output will be written to two FASTQ files
+#    [SAMPLE_ID]_[LANE_ID].fq1.gz
+#    [SAMPLE_ID]_[LANE_ID].fq2.gz
+#
+@collate(convert_bcl_to_fastq, regex(r'([^_]+_[^_]+).+\.trimmed\.fastq\.gz$'),  r'\1.fq1.gz')
+def trim_reads(inputs, output):
+    outfq1 = output
+    outfq2 = output.replace('fq1.gz','fq2.gz')
+    unpaired = [outfq1.replace('fq1.gz','fq1_unpaired.gz'), outfq2.replace('fq2.gz','fq2_unpaired.gz')]               
+    logfile = ''
+    args = "-phred33 \
+            -threads 1 \
+            -trimlog {log} \
+            ${in1} ${in2} ${out1} ${unpaired1} ${out2} ${unpaired2} \
+            MINLEN:36 \
+            ILLUMINACLIP:{adapter}:2:30:10 \
+            LEADING:3 \
+            TRAILING:3 \
+            SLIDINGWINDOW:4:15".format(log=logfile,
+                                       in1=inputs[0], in2=inputs[1],
+                                       out1=outfq1, out2=outfq2,
+                                       unpaired1=unpaired[0], unpaired2=unpaired[1],
+                                       adapter=adapters)
+    run_cmd(trimmomatic, args)
+
+
+#
+# FASTQ filenames are expected to have following format:
+#    [SAMPLE_ID]_[LANE_ID].fq[1|2].gz
+# In this step, the fq1 file coming from trim_reads is matched with the fq2 file and mapped together. 
+# The output will be written to SAM file:
+#    [SAMPLE_ID]_[LANE_ID].sam
+#
+#@collate(trim_reads, regex(r"([^_]+_[^_]+)\.fq[12]\.gz$"), r'\1.sam')
+@transform(trim_reads, suffix('.fq1.gz'), add_inputs(r'\1.fq2.gz'), '.sam')
+def align_reads(fastqs, sam):
+    args = "mem {ref} {fq1} {fq2} > {sam}".format(ref=reference, fq1=fastqs[0], fq2=fastqs[1], sam=sam)
+    run_cmd(bwa, args)
+    
+
+#
+# SAM filenames are expected to have following format:
+#    [SAMPLE_ID]_[LANE_ID].sam
+# In this step, all SAM files matching on the SAMPLE_ID will be merged into one BAM file:
+#    [SAMPLE_ID].bam
+#
+@collate(align_reads, regex(r"([^_]+).+\.sam$"),  r'\1.bam')
+def merge_lanes(lane_sams, bam):
+    args = "MergeSamFiles O={bam} \
+            ASSUME_SORTED=false \
+            ".format(bam=bam)
+    # include all sam files as args
+    for sam in lane_sams:
+        args += "O={sam} ".format(sam=sam)
+        
+    run_cmd(picard, args, "-Xmx8g")
+    
 
 #
 #
