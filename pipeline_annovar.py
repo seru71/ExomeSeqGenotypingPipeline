@@ -156,7 +156,7 @@ if __name__ == '__main__':
     annovar_human_db = config.get('Resources','annovar-humandb-dir')
     annovar_1000genomes_eur = config.get('Resources','annovar-1000genomes-eur')
     annovar_common_inhouse_db = config.get('Resources','annovar-common-inhouse-db')
-    annovar_common_miseq5_db = config.get('Resources','annovar-common-miseq5-db')
+#    annovar_common_miseq5_db = config.get('Resources','annovar-common-miseq5-db')
     annovar_common_miseq30_db = config.get('Resources','annovar-common-miseq30-db')
     omim_gene_phenotype_map_file = config.get('Resources','omim_gene_phenotype_map')
 
@@ -514,7 +514,7 @@ omim_gene_phenotype_map = get_omim_gene_phenotype_map(omim_gene_phenotype_map_fi
 
 from utility_functions import quote_aware_split, parenthesis_aware_split
 
-@transform(produce_miseq5_variants_annotation_table, formatter(), '{path[1]}/{basename[1]}.with_omim.csv')
+@transform(produce_miseq30_variants_annotation_table, formatter(), '{path[1]}/{basename[1]}.with_omim.csv')
 def include_omim_phenotype_annotation(inputs, output_table, gene_column=7, omim_column=15, delim=','):
     """ include OMIM phenotype into the annotation table """
     table_in = open(inputs[1],'r')
@@ -710,26 +710,28 @@ def get_stats_on_inhouse_filtered_variants(inputs, outputs):
 
 
 @merge([get_stats_on_raw_variants, get_stats_on_1kg_filtered_variants, 
-        get_stats_on_inhouse_filtered_variants, annotate_function_of_miseq30_variants, #get_stats_on_miseq30_filtered_variants, 
-	annotate_function_of_miseq5_variants], 'all_samples_exonic_variant_stats.tsv')
+        get_stats_on_inhouse_filtered_variants, annotate_function_of_miseq30_variants], 
+#       get_stats_on_miseq30_filtered_variants,
+#	annotate_function_of_miseq5_variants], 
+	'all_samples_exonic_variant_stats.tsv')
 def produce_variant_stats_table(infiles, table_file):
     """ produce a table of per-sample counts of different type of exonic variants """
 
     var_types=['splicing','UTR3','UTR5','intronic','intergenic','exonic']
     
     # split the input files per task
-    sample_no = len(infiles)/5
+    sample_no = len(infiles)/4
     raw_variant_files = infiles[0:sample_no]
     kg1_filtered_variant_files = infiles[sample_no:sample_no*2]
     inhouse_filtered_variant_files = infiles[sample_no*2:sample_no*3]
     miseq30_filtered_variant_files = infiles[sample_no*3:sample_no*4]
-    rare_variant_files = infiles[4*sample_no:5*sample_no]
+#    rare_variant_files = infiles[4*sample_no:5*sample_no]
 
     out = open(table_file,'w')
    
     import itertools
     #header = ['sample'] + ['raw_'+t for t in var_types] + ['rare_'+t for t in var_types] + ['raw_synonymous','rare_synonymous']
-    filtering_stages = ['raw_','kg1_','inhouse_','miseq30_','rare_']
+    filtering_stages = ['raw_','kg1_','inhouse_','miseq30_']#,'rare_']
     header = ['sample'] + \
             [f+t for (f,t) in itertools.product(filtering_stages, var_types)] + \
             [s+'_synonymous' for s in filtering_stages]
@@ -737,8 +739,8 @@ def produce_variant_stats_table(infiles, table_file):
     for i in range(0,sample_no):
         out.write(os.path.basename(raw_variant_files[i][0]).split('.')[0])
         for fname in [raw_variant_files[i][0], kg1_filtered_variant_files[i][0], \
-                        inhouse_filtered_variant_files[i][0], miseq30_filtered_variant_files[i][2], \
-                        rare_variant_files[i][2]]: # exonic variant stats of raw variants and rare variants
+                        inhouse_filtered_variant_files[i][0], miseq30_filtered_variant_files[i][2]]:
+                        #rare_variant_files[i][2]]: # exonic variant stats of raw variants and rare variants
             counts = dict.fromkeys(var_types,'0')
             f=open(fname)        
             for l in f.xreadlines():
@@ -752,8 +754,8 @@ def produce_variant_stats_table(infiles, table_file):
             f.close()
 
         for fname in [raw_variant_files[i][1], kg1_filtered_variant_files[i][1], \
-                        inhouse_filtered_variant_files[i][1], miseq30_filtered_variant_files[i][3], \
-                        rare_variant_files[i][3]]: # synonymous variants stats of raw and rare variants
+                        inhouse_filtered_variant_files[i][1], miseq30_filtered_variant_files[i][3]]:
+                        #rare_variant_files[i][3]]: # synonymous variants stats of raw and rare variants
             f=open(fname)
             found=False
             for l in f.xreadlines():
@@ -767,7 +769,7 @@ def produce_variant_stats_table(infiles, table_file):
     out.close()
 
 
-@follows(count_hetz_and_homz_per_chr, produce_variant_stats_table)
+@follows(produce_variant_stats_table)
 def variant_qc():
     """ empty task aggregating all variant QC tasks """
     pass
