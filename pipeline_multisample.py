@@ -164,6 +164,7 @@ if __name__ == '__main__':
     
     # Inputs 
     input_bams = os.path.join(data_root, config.get('Inputs','input-bams'))
+    input_dir  = os.path.join(data_root, config.get('Inputs','input-dir'))
     
     # variant calls from other projects to call together with (semicolon separated list)
     try: 
@@ -186,7 +187,11 @@ if __name__ == '__main__':
     capture_qualimap = os.path.join(reference_root, config.get('Resources','capture-regions-bed-for-qualimap'))
     exome = os.path.join(reference_root, config.get('Resources', 'exome-regions-bed'))
     
-    # tools 
+    adapters = os.path.join(reference_root, config.get('Resources', 'adapters-fasta'))
+    
+    # tools
+    bcl2fastq = config.get('Tools','bcl2fastq')
+    trimmomatic = config.get('Tools', 'trimmomatic') 
     bwa = config.get('Tools','bwa')
     samtools = config.get('Tools','samtools')
     picard = config.get('Tools','picard-tools')
@@ -224,7 +229,11 @@ def run_cmd(cmd, args, interpreter_args=None, run_locally=False, dockerize=True)
     
     if dockerize:
 
-        if interpreter_args==None or interpreter_args.strip()=="":
+#        full_cmd = "{docker} {cmd} \"{args}\"".format(docker=docker,cmd=cmd,args=args)
+#        if interpreter_args!=None and interpreter_args.strip()!="":
+#            full_cmd += " \"{}\"".format(interpreter_args)
+            
+        if interpreter_args==None:
             full_cmd = "{docker} {cmd} {args}".format(docker=docker,cmd=cmd,args=args)
         else:
             full_cmd = "{docker} {cmd} \"{args}\" \"{iargs}\" \
@@ -253,39 +262,38 @@ def index_bam(bam):
                           
 def bam_quality_score_distribution(bam,qs,pdf):
     """Calculates quality score distribution histograms"""
-    run_cmd(picard, 
-                       "QualityScoreDistribution \
-                        CHART_OUTPUT={chart} \
-                        OUTPUT={out} \
-                        INPUT={bam} \
-                        VALIDATION_STRINGENCY=SILENT \
-                        ".format(chart=pdf, out=qs, bam=bam))
+    run_cmd(picard, "QualityScoreDistribution \
+                    CHART_OUTPUT={chart} \
+                    OUTPUT={out} \
+                    INPUT={bam} \
+                    VALIDATION_STRINGENCY=SILENT \
+                    ".format(chart=pdf, out=qs, bam=bam),
+            interpreter_args="")
 
 def bam_alignment_metrics(bam,metrics):
     """Collects alignment metrics for a bam file"""
-    run_cmd(picard, 
-                       "CollectAlignmentSummaryMetrics \
-                        REFERENCE_SEQUENCE={ref} \
-                        OUTPUT={out} \
-                        INPUT={bam} \
-                        VALIDATION_STRINGENCY=SILENT \
-                        ".format(ref=reference, out=metrics, bam=bam))
+    run_cmd(picard, "CollectAlignmentSummaryMetrics \
+                    REFERENCE_SEQUENCE={ref} \
+                    OUTPUT={out} \
+                    INPUT={bam} \
+                    VALIDATION_STRINGENCY=SILENT \
+                    ".format(ref=reference, out=metrics, bam=bam),
+            interpreter_args="")
     
 def bam_coverage_metrics(input_bam, output):
     """ Calculates and outputs bam coverage statistics """
-    run_cmd(gatk,
-                       "-R {reference} \
-                        -T DepthOfCoverage \
-                        -o {output} \
-                        -I {input} \
-                        -L {capture} \
-                        -ct 8 -ct 20 -ct 30 \
-                        --omitDepthOutputAtEachBase --omitLocusTable \
-                        ".format(reference=reference,
-                                 output=output,
-                                 input=input_bam,
-                                 capture=capture), 
-                       "-Xmx4g")
+    run_cmd(gatk, "-R {reference} \
+                    -T DepthOfCoverage \
+                    -o {output} \
+                    -I {input} \
+                    -L {capture} \
+                    -ct 8 -ct 20 -ct 30 \
+                    --omitDepthOutputAtEachBase --omitLocusTable \
+                    ".format(reference=reference,
+                             output=output,
+                             input=input_bam,
+                             capture=capture), 
+            interpreter_args="-Xmx4g")
 
 def qualimap_bam(input_bam, output_dir):
     """ Generates Qualimap bam QC report """
@@ -293,15 +301,15 @@ def qualimap_bam(input_bam, output_dir):
     if not os.path.exists('qc'): os.mkdir('qc')
     if not os.path.exists('qc/qualimap/'): os.mkdir('qc/qualimap')
     if not os.path.exists(output_dir): os.mkdir(output_dir)
-    run_cmd(qualimap,
-                       "bamqc -bam {bam} \
-                       -c -outformat PDF \
-                       -gff {target} \
-                       -gd HUMAN -os \
-                       -outdir {dir} &> {dir}/qualimap.err \
-                       ".format(bam=input_bam,
+    run_cmd(qualimap, "bamqc -bam {bam} \
+                        -c -outformat PDF \
+                        -gff {target} \
+                        -gd HUMAN -os \
+                        -outdir {dir} &> {dir}/qualimap.err \
+                        ".format(bam=input_bam,
                                 target=capture_qualimap,
-                                dir=output_dir))
+                                dir=output_dir),
+            interpreter_args="")
 
     
 
@@ -396,10 +404,128 @@ from ruffus import *
 
 
 def get_sample_ids():
-    files = glob.glob(input_bams)
-    return [ os.path.splitext(os.path.basename(f))[0] for f in files ]
+    #files = glob.glob(input_bams)
+    #return [ os.path.splitext(os.path.basename(f))[0] for f in files ]
+    
+    files = glob.glob(os.path.join(input_dir,'*.bcl'))
+    # expect files in form /path/to/data/dir/[SAMPLE_ID]_[LANE_ID]_R[1|2]_001.bcl
+    # and return a list of unique sorted SAMPLE_IDs
+    ids = [ (os.path.splitext(os.path.basename(f))[0]).split('_')[0] for f in files ]
+    uniq_ids = list(set(ids))
+    uniq_ids.sort()
+    return uniq_ids
 
-def generate_parameters():
+def get_num_files():
+    return len(get_sample_ids)
+
+def are_fastqs_missing(_, dir):
+    fastqs = glob.glob(os.path.join(dir,'Data','Intensities','BaseCalls','*.fastq.gz'))
+    print(fastqs)
+
+    for fastq in fastqs:
+        if not fastq.startswith('Undetermined'): 
+            return False, 'FASTQ file %s found. Skipping bcl2fastq conversion' % os.path.basename(fastq)
+    return True, 'No FASTQ files found'
+
+
+#
+# Preprocess the reads, only if fastqs don't exist
+#
+@originate([input_dir])
+@check_if_uptodate(are_fastqs_missing)
+def bcl2fastq_conversion(run_directory):
+    """ Run bcl2fastq conversion and create fastq files in the run directory"""
+    #log_file = os.path.join(run_directory,'Data','Intensities','BaseCalls','bcl2fastq.log')
+    # r, w, d, and p specify numbers of threads to be used for each of the concurrent subtasks of the conversion (see bcl2fastq manual) 
+    run_cmd(bcl2fastq, "-R {dir} -r1 -w1 -d2 -p4".format(dir=run_directory))
+
+
+
+
+#
+# Prepare directory structure - link the input fastq files
+# Expected format:
+#    /path/to/file/[SAMPLE_ID]_[anything_except_path_delimiter].fastq.gz
+#
+@follows(bcl2fastq_conversion)
+@subdivide(os.path.join(input_dir,'Data','Intensities','BaseCalls','*.fastq.gz'), 
+           formatter('.+/(?P<SAMPLE_ID>[^_/]+)_S[1-9][0-9]?_L\d\d\d_R[12]_001\.fastq\.gz$'), 
+           '{SAMPLE_ID[0]}/{basename[0]}{ext[0]}')
+def link(fastq_in, linked_fastq):
+    """Make working directory for this sample and make symlink to fastq files"""
+    if not os.path.exists(os.path.dirname(linked_fastq)):
+        os.mkdir(os.path.dirname(linked_fastq))
+    if not os.path.exists(linked_fastq):
+        os.symlink(fastq_in, linked_fastq) 
+
+
+    
+    
+    
+#
+# Input FASTQ filenames are expected to have following format:
+#    [SAMPLE_ID]_[S_NUM]_[LANE_ID]_[R1|R2]_001.fastq.gz
+# In this step, the two FASTQ files matching on the [SAMPLE_ID]_[S_ID]_[LANE_ID] will be trimmed together (R1 and R2). 
+# The output will be written to two FASTQ files
+#    [SAMPLE_ID]_[LANE_ID].fq1.gz
+#    [SAMPLE_ID]_[LANE_ID].fq2.gz
+#
+@collate(link, regex(r'([^_]+)_S[1-9]\d?_(L\d\d\d)_R[12]_001\.fastq\.gz$'),  r'\1_\2.fq1.gz')
+def trim_reads(inputs, output):
+    outfq1 = output
+    outfq2 = output.replace('fq1.gz','fq2.gz')
+    unpaired = [outfq1.replace('fq1.gz','fq1_unpaired.gz'), outfq2.replace('fq2.gz','fq2_unpaired.gz')]               
+    logfile = output.replace('fq1.gz','trimmomatic.log')
+    args = "PE -phred33 -threads 1 -trimlog {log} \
+            {in1} {in2} {out1} {unpaired1} {out2} {unpaired2} \
+            MINLEN:36 \
+            ILLUMINACLIP:{adapter}:2:30:10 \
+            LEADING:3 \
+            TRAILING:3 \
+            SLIDINGWINDOW:4:15".format(log=logfile,
+                                       in1=inputs[0], in2=inputs[1],
+                                       out1=outfq1, out2=outfq2,
+                                       unpaired1=unpaired[0], unpaired2=unpaired[1],
+                                       adapter=adapters)
+    run_cmd(trimmomatic, args, interpreter_args="")
+
+
+#
+# FASTQ filenames are expected to have following format:
+#    [SAMPLE_ID]_[LANE_ID].fq[1|2].gz
+# In this step, the fq1 file coming from trim_reads is matched with the fq2 file and mapped together. 
+# The output will be written to SAM file:
+#    [SAMPLE_ID]_[LANE_ID].sam
+#
+#@collate(trim_reads, regex(r"([^_]+_[^_]+)\.fq[12]\.gz$"), r'\1.sam')
+@transform(trim_reads, suffix('.fq1.gz'), add_inputs(r'\1.fq2.gz'), '.sam')
+def align_reads(fastqs, sam):
+    args = "mem {ref} {fq1} {fq2} > {sam}".format(ref=reference, fq1=fastqs[0], fq2=fastqs[1], sam=sam)
+    run_cmd(bwa, args)
+    
+
+#
+# SAM filenames are expected to have following format:
+#    [SAMPLE_ID]_[LANE_ID].sam
+# In this step, all SAM files matching on the SAMPLE_ID will be merged into one BAM file:
+#    [SAMPLE_ID].bam
+#
+@collate(align_reads, regex(r"([^_]+).+\.sam$"),  r'\1.bam')
+def merge_lanes(lane_sams, bam):
+    args = "MergeSamFiles O={bam} \
+            ASSUME_SORTED=false \
+            ".format(bam=bam)
+    # include all sam files as args
+    for sam in lane_sams:
+        args += "O={sam} ".format(sam=sam)
+        
+    run_cmd(picard, args, interpreter_args="-Xmx8g")
+    
+
+#
+# For bam-level entry to the pipeline. 
+#
+def generate_bam_inputs():
     files = glob.glob(input_bams)
     parameters = []
     for f in files:
@@ -408,28 +534,19 @@ def generate_parameters():
     for job_parameters in parameters:
             yield job_parameters
 
-def get_num_files():
-    files = glob.glob(input_bams)
-    return len(files)
 
-#
-#
-# Prepare input directory structure
-#
+def clean_fastqs():
+    """ Remove the trimmed fastq files. Links to original fastqs are kept """
+    run_cmd("rm -f */*.fq[12].gz", run_locally=True)
 
-@files(generate_parameters)
-def link(none, bam, extra):
-    """Make working directory and make symlink to bam file"""
-    if not os.path.exists(extra[0]):
-        os.mkdir(extra[0])
-    if not os.path.exists(bam):
-        os.symlink(extra[1], bam) 
 
-#@follows(link)
-@transform(link, suffix(".bam"), '.bam.bai')
+@posttask(clean_fastqs)
+@transform(merge_lanes, suffix(".bam"), '.bam.bai')
 def index(bam, output):
     """Create raw bam index"""
     index_bam(bam)
+
+
 
 
 #
@@ -476,15 +593,13 @@ def raw_bam_qc():
 
 def dup_removal_picard(bam,output):
     """Use Picard to remove duplicates"""
-    run_cmd(picard, 
-                       "CleanSam \
-                        INPUT={bam} \
-                        OUTPUT={out} \
-                        VALIDATION_STRINGENCY=LENIENT \
-                        VERBOSITY=ERROR CREATE_INDEX=TRUE \
-                        ".format(bam=bam, 
-                                 out=output),
-                        "-Xmx4g")
+    args = "CleanSam \
+           INPUT={bam} \
+           OUTPUT={out} \
+           VALIDATION_STRINGENCY=LENIENT \
+           VERBOSITY=ERROR CREATE_INDEX=TRUE \
+           ".format(bam=bam, out=output)
+    run_cmd(picard, args, interpreter_args="-Xmx4g")
    
 def dup_mark_picard(bam,output):
     """Use Picard to mark duplicates"""
@@ -498,7 +613,7 @@ def dup_mark_picard(bam,output):
             ".format(tmp=tmp_dir, 
                      bam=bam, 
                      out=output)
-    run_cmd(picard,args,"-Xmx4g")
+    run_cmd(picard, args, interpreter_args="-Xmx4g")
 
 
 @follows(index)
@@ -531,7 +646,7 @@ def find_realignment_intervals(foo, intervals, input_bam):
                              indels1=indels_1kg, 
                              indels2=mills, 
                              out=intervals)
-    run_cmd(gatk,args,"-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
 
 
 #@follows(find_realignment_intervals)
@@ -550,7 +665,7 @@ def indel_realigner(intervals_file, realigned_bam, input_bam):
                              indels1=indels_1kg, 
                              indels2=mills, 
                              out=realigned_bam)
-    run_cmd(gatk,args,"-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
 
 
 #@follows(indel_realigner)
@@ -566,7 +681,7 @@ def recalibrate_baseq1(input_bam, output):
                             dbsnp=dbsnp, 
                             bam=input_bam, 
                             out=output)
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
     
 
 # This custom check ensures that the recalibrate_baseq2 step is not run in --rebuild_mode if the .gatk.bam exists
@@ -594,7 +709,7 @@ def recalibrate_baseq2(inputs, output_bam):
                                   bam=bam, 
                                   out=output_bam, 
                                   recal=recal_data) 
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
     
     # remove(inputs[0])
 
@@ -649,7 +764,7 @@ def reduce_bam(bam, output):
             -R %s \
             -I %s \
             -o %s" % (reference, bam, output)
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
 
 
 def split_seq(seq, num_pieces):
@@ -672,7 +787,7 @@ def multisample_variant_call(bams, output):
     #log the results
     args = args + '&> {}.log'.format(output)
     
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir)
     
 def merge_batch_vcf(vcfs, output):
     """Merges vcf files from the batch run"""
@@ -682,16 +797,14 @@ def merge_batch_vcf(vcfs, output):
         merging = ''
         for i in range(len(vcfs)):
             merging = merging + ' -V:batch{number} {file}'.format(number=i,file=vcfs[i])
-        run_cmd(gatk,
-                           "-R {reference} \
-                            -T CombineVariants \
-                            -o {output} \
-                            {files}".format(
+        run_cmd(gatk, "-R {reference} \
+                        -T CombineVariants \
+                        -o {output} \
+                        {files}".format(
                                 reference=reference,
                                 output=output,
-                                files=merging
-                                ),
-                           "-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir) 
+                                files=merging),
+                interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir) 
 
 @merge(reduce_bam, 'multisample.gatk.vcf')
 def call_variants(infiles, output):
@@ -734,7 +847,7 @@ def call_haplotypes(bam, output_gvcf):
 
     #log the results
     #cmd = cmd + '&> {}.log'.format(output_gvcf)
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
 
 
 @merge(call_haplotypes, 'multisample.gatk.gvcf')
@@ -748,7 +861,7 @@ def merge_gvcfs(gvcfs, merged_gvcf):
         args = args + " --variant {}".format(gvcf)
     
     args = args + '&> {}.log'.format(merged_gvcf)
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
     
 
 @originate(call_with_gvcfs)
@@ -767,7 +880,7 @@ def genotype_gvcfs(gvcfs, output):
         args = args + " --variant {}".format(gvcf)
 
     args = args + '&> {}.log'.format(output)
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir)
 
 
 #
@@ -790,7 +903,7 @@ def call_mt_haplotypes(bam, output_gvcf):
             -minPruning 4 \
             -L MT \
             --dbsnp %s " % (reference, bam, output_gvcf, dbsnp)
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
 
 @merge(call_mt_haplotypes, 'multisample.gatk.mt.gvcf')
 def merge_mt_gvcfs(gvcfs, merged_gvcf):
@@ -801,7 +914,7 @@ def merge_mt_gvcfs(gvcfs, merged_gvcf):
         args = args + " --variant {}".format(gvcf)
     
     args = args + '&> {}.log'.format(merged_gvcf)
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
     
 @merge([merge_mt_gvcfs], 'multisample.gatk.mt.vcf')
 def genotype_mt_gvcfs(gvcfs, output):
@@ -813,7 +926,7 @@ def genotype_mt_gvcfs(gvcfs, output):
         args = args + " --variant {}".format(gvcf)
 
     args = args + '&> {}.log'.format(output)
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir)
 
 
 
@@ -857,7 +970,7 @@ def find_snp_tranches_for_recalibration(vcf,outputs):
     if get_num_files() > 10:
         args += " -an InbreedingCoeff"
         
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir)
 
 
 @follows(find_snp_tranches_for_recalibration)
@@ -888,7 +1001,7 @@ def find_indel_tranches_for_recalibration(vcf,outputs):
     if get_num_files() > 10:
         args += " -an InbreedingCoeff"
         
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir)
 
 
 def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP'):
@@ -910,7 +1023,7 @@ def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP'):
                 num_jobs=options.jobs,
                 output=output)
             
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir)
 
 
 
@@ -947,7 +1060,7 @@ def filter_variants(input_vcf, output_vcf):
                 reference=reference)
 
     # remove(input)
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx12g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx12g" % tmp_dir)
 
 
 #@follows(filter_variants)
@@ -965,7 +1078,7 @@ def remove_filtered(input_vcf, output_vcf):
                 output=output_vcf)
 
     # remove(input)
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx12g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx12g" % tmp_dir)
     
 
 #@follows(remove_filtered)
@@ -1025,7 +1138,7 @@ def split_snps(vcf, output, sample):
                      ad_thr=AD_threshold, 
                      dp_thr=DP_threshold)
             
-    run_cmd(gatk, args, "-Djava.io.tmpdir=%s -Xmx2g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx2g" % tmp_dir)
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
