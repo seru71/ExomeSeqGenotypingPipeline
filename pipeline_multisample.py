@@ -458,8 +458,6 @@ def link(fastq_in, linked_fastq):
     if not os.path.exists(linked_fastq):
         os.symlink(fastq_in, linked_fastq) 
 
-
-    
     
     
 #
@@ -547,6 +545,12 @@ def index(bam, output):
     index_bam(bam)
 
 
+
+
+#
+# clean the fastq files if index succeeds
+#
+#
 
 
 #
