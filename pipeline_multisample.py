@@ -150,12 +150,21 @@ if __name__ == '__main__':
     # Root dirs
     data_root = config.get('Docker','data-root')
     reference_root = config.get('Docker','reference-root')
-        
-    results_root = None
+      
+    # optional results and fastq archive dirs  
+    results_archive = None
     try:
-        results_root = config.get('Docker','results-root')
+        results_archive = config.get('Docker','results-archive')
     except ConfigParser.NoOptionError:
-        print 'No results-root provided. Results will not be archived outside of the current (working) directory.'
+        print 'No results-archive provided. Results will not be archived outside of the current (working) directory.'
+    
+    fastq_archive = None
+    try:
+        fastq_archive = config.get('Docker','fastq-archive')
+    except ConfigParser.NoOptionError:
+        print 'No fastq-archive provided. Fastq files will not be archived outside of the current (working) directory.'
+
+    
     
     tmp_dir = None
     try:
@@ -169,8 +178,8 @@ if __name__ == '__main__':
     docker_args = config.get('Docker', 'docker-args')
     docker_args += " -v " + ":".join([data_root,data_root,"ro"])
     docker_args += " -v " + ":".join([reference_root,reference_root,"ro"])
-    if results_root != None:
-        docker_args += " -v " + ":".join([results_root,results_root,"rw"])
+    if results_archive != None:
+        docker_args += " -v " + ":".join([results_archive,results_archive,"rw"])
         
     if tmp_dir != None: 
         docker_args += " -v " + ":".join([tmp_dir,tmp_dir,"rw"])
@@ -459,34 +468,44 @@ def are_fastqs_missing(_, dir):
 @check_if_uptodate(are_fastqs_missing)
 def bcl2fastq_conversion(run_directory):
     """ Run bcl2fastq conversion and create fastq files in the run directory"""
-    #log_file = os.path.join(run_directory,'Data','Intensities','BaseCalls','bcl2fastq.log')
     # r, w, d, and p specify numbers of threads to be used for each of the concurrent subtasks of the conversion (see bcl2fastq manual) 
     #run_cmd(bcl2fastq, "-R {dir} -r1 -w1 -d2 -p4".format(dir=run_directory), cpus=8, mem_per_cpu=2048)
     run_cmd(bcl2fastq, 
-            "-R {indir} -o {outdir} -r1 -w1 -d2 -p4".format(indir=run_directory, outdir=cwd), 
-            cpus=8, mem_per_cpu=2048)
-
-
+           "-R {indir} -o {outdir} -r1 -w1 -d2 -p4".format(indir=run_directory, outdir=cwd), 
+          cpus=8, mem_per_cpu=2048)
 
 
 #
-# Prepare directory structure - link the input fastq files
+# Prepare directory structure move in the input fastq files
 # Expected format:
 #    /path/to/file/[SAMPLE_ID]_[anything_except_path_delimiter].fastq.gz
 #
+@jobs_limit(1)    # to avoid problems with simultanous creation of the same sample dir
+@posttask(archive_fastqs)
 @follows(bcl2fastq_conversion)
-@subdivide(os.path.join(input_dir,'Data','Intensities','BaseCalls','*.fastq.gz'), 
+#@subdivide(os.path.join(input_dir,'Data','Intensities','BaseCalls','*.fastq.gz'), 
+@subdivide(os.path.join(cwd,'*.fastq.gz'),
            formatter('.+/(?P<SAMPLE_ID>[^_/]+)_S[1-9][0-9]?_L\d\d\d_R[12]_001\.fastq\.gz$'), 
            '{SAMPLE_ID[0]}/{basename[0]}{ext[0]}')
-def link(fastq_in, linked_fastq):
-    """Make working directory for this sample and make symlink to fastq files"""
-    if not os.path.exists(os.path.dirname(linked_fastq)):
-        os.mkdir(os.path.dirname(linked_fastq))
-    if not os.path.exists(linked_fastq):
-        os.symlink(fastq_in, linked_fastq) 
+def segregate_fastqs(fastq_in, fastq_out):
+    """Make working directory for every sample and move fastq files in"""
+    if not os.path.exists(os.path.dirname(fastq_out)):
+        os.mkdir(os.path.dirname(fastq_out))
+    if not os.path.exists(fastq_out):
+        os.rename(fastq_in, fastq_out) 
 
     
     
+def archive_fastqs():
+    """ Archive fastqs """
+    # if optional fastq-archive-root was not provided - do nothing
+    if fastq_archive == None: return
+    
+    run_name = os.path.basename(cwd)
+    arch_path = os.path.join(fastq_archive, run_name)
+    run_cmd("mkdir %s" % arch_path, run_locally=True)
+    run_cmd("cp -L */*.fastq.gz %s" % arch_path, run_locally=True)
+
 #
 # Input FASTQ filenames are expected to have following format:
 #    [SAMPLE_ID]_[S_NUM]_[LANE_ID]_[R1|R2]_001.fastq.gz
@@ -527,11 +546,11 @@ def trim_reads(inputs, output):
 #@collate(trim_reads, regex(r"([^_]+_[^_]+)\.fq[12]\.gz$"), r'\1.sam')
 @transform(trim_reads, suffix('.fq1.gz'), add_inputs(r'\1.fq2.gz'), '.sam')
 def align_reads(fastqs, sam):
-    threads = 4
+    threads = 1
     args = "mem -t {threads} {ref} {fq1} {fq2} > {sam} \
-            ".format(threads=theads, ref=reference, 
+            ".format(threads=threads, ref=reference, 
                      fq1=fastqs[0], fq2=fastqs[1], sam=sam)
-    run_cmd(bwa, args, cpus=threads, mem_per_cpu=4096/threads)
+    run_cmd(bwa, args, cpus=threads, mem_per_cpu=8192/threads)
     
 
 #
@@ -1148,15 +1167,15 @@ def cleanup_files():
 
 
 def archive_results():
-    # if optional results_root was not provided - do nothing
-    if results_root == None: return
+    # if optional results_archive was not provided - do nothing
+    if results_archive == None: return
     
     run_name = os.path.basename(os.getcwd())
-    arch_path = os.path.join(results_root, run_name)
+    arch_path = os.path.join(results_archive, run_name)
     run_cmd("mkdir %s" % arch_path, run_locally=True)
     run_cmd("cp */*.gatk.bam %s" % arch_path, run_locally=True)
     run_cmd("cp */*.exome.vcf %s" % arch_path, run_locally=True)
-    run_cmd("cp multisample.gatk.gvcf %s" % os.path.join(results_root,run_name+".multisample.gatk.gvcf"),
+    run_cmd("cp multisample.gatk.gvcf %s" % os.path.join(results_archive,run_name+".multisample.gatk.gvcf"),
             run_locally=True)
 
 
