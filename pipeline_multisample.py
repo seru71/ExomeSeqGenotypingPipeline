@@ -451,8 +451,8 @@ def get_sample_ids():
 def get_num_files():
     return len(get_sample_ids)
 
-def are_fastqs_missing(_, dir):
-    fastqs = glob.glob(os.path.join(dir,'Data','Intensities','BaseCalls','*.fastq.gz'))
+def are_fastqs_missing(_,__):
+    fastqs = glob.glob(os.path.join(cwd,'*','*.fastq.gz'))
     print(fastqs)
 
     for fastq in fastqs:
@@ -473,6 +473,17 @@ def bcl2fastq_conversion(run_directory):
     run_cmd(bcl2fastq, 
            "-R {indir} -o {outdir} -r1 -w1 -d2 -p4".format(indir=run_directory, outdir=cwd), 
           cpus=8, mem_per_cpu=2048)
+
+
+def archive_fastqs():
+    """ Archive fastqs """
+    # if optional fastq-archive-root was not provided - do nothing
+    if fastq_archive == None: return
+
+    run_name = os.path.basename(cwd)
+    arch_path = os.path.join(fastq_archive, run_name)
+    run_cmd("mkdir %s" % arch_path, run_locally=True)
+    run_cmd("cp -L */*.fastq.gz %s" % arch_path, run_locally=True)
 
 
 #
@@ -496,16 +507,6 @@ def segregate_fastqs(fastq_in, fastq_out):
 
     
     
-def archive_fastqs():
-    """ Archive fastqs """
-    # if optional fastq-archive-root was not provided - do nothing
-    if fastq_archive == None: return
-    
-    run_name = os.path.basename(cwd)
-    arch_path = os.path.join(fastq_archive, run_name)
-    run_cmd("mkdir %s" % arch_path, run_locally=True)
-    run_cmd("cp -L */*.fastq.gz %s" % arch_path, run_locally=True)
-
 #
 # Input FASTQ filenames are expected to have following format:
 #    [SAMPLE_ID]_[S_NUM]_[LANE_ID]_[R1|R2]_001.fastq.gz
@@ -514,7 +515,7 @@ def archive_fastqs():
 #    [SAMPLE_ID]_[LANE_ID].fq1.gz
 #    [SAMPLE_ID]_[LANE_ID].fq2.gz
 #
-@collate(link, regex(r'([^_]+)_S[1-9]\d?_(L\d\d\d)_R[12]_001\.fastq\.gz$'),  r'\1_\2.fq1.gz')
+@collate(segregate_fastqs, regex(r'([^_]+)_S[1-9]\d?_(L\d\d\d)_R[12]_001\.fastq\.gz$'),  r'\1_\2.fq1.gz')
 def trim_reads(inputs, output):
     outfq1 = output
     outfq2 = output.replace('fq1.gz','fq2.gz')
@@ -604,24 +605,24 @@ def index(bam, output):
 #
 
 @follows(index)
-@transform(link, suffix(".bam"), '.quality_score')
+@transform(merge_lanes, suffix(".bam"), '.quality_score')
 def qc_raw_bam_quality_score_distribution(input_bam, output):
     """docstring for metrics1"""
     bam_quality_score_distribution(input_bam, output, output + '.pdf')
 
 @follows(index)
-@transform(link, suffix(".bam"), '.metrics')
+@transform(merge_lanes, suffix(".bam"), '.metrics')
 def qc_raw_bam_alignment_metrics(input_bam, output):
     """docstring for metrics1"""
     bam_alignment_metrics(input_bam, output)
     
 @follows(index)
-@transform(link, suffix(".bam"), '.coverage.sample_summary', r'\1.coverage')
+@transform(merge_lanes, suffix(".bam"), '.coverage.sample_summary', r'\1.coverage')
 def qc_raw_bam_coverage_metrics(input_bam, output, output_format):
     bam_coverage_metrics(input_bam, output_format)
 
 @follows(index)
-@transform(link, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{subpath[0][1]}/qc/qualimap/{SAMPLE_ID[0]}')
+@transform(merge_lanes, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{subpath[0][1]}/qc/qualimap/{SAMPLE_ID[0]}')
 def qc_raw_bam_qualimap_report(input_bam, output_dir):
     qualimap_bam(input_bam, output_dir)
 
@@ -666,7 +667,7 @@ def dup_mark_picard(bam,output):
 
 
 @follows(index)
-@transform(link, suffix(".bam"), '.dedup.bam')
+@transform(merge_lanes, suffix(".bam"), '.dedup.bam')
 def remove_dups(bam, output):
     """Mark duplicates"""
     #run_cmd(samtools,"rmdup %s %s" % (bam,output))
