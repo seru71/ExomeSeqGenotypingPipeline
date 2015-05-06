@@ -150,13 +150,33 @@ if __name__ == '__main__':
     # Root dirs
     data_root = config.get('Docker','data-root')
     reference_root = config.get('Docker','reference-root')
-    results_root = config.get('Docker','results-root')
+        
+    results_root = None
+    try:
+        results_root = config.get('Docker','results-root')
+    except ConfigParser.NoOptionError:
+        print 'No results-root provided. Results will not be archived outside of the current (working) directory.'
+    
+    tmp_dir = None
+    try:
+        tmp_dir = config.get('Docker','tmp-dir')
+    except ConfigParser.NoOptionError:
+        print 'No tmp-dir provided. Container\'s /tmp will be used.'
+    
     
     # Docker executable and args
     docker_bin = config.get('Docker','docker-binary')
     docker_args = config.get('Docker', 'docker-args')
     docker_args += " -v " + ":".join([data_root,data_root,"ro"])
     docker_args += " -v " + ":".join([reference_root,reference_root,"ro"])
+    if results_root != None:
+        docker_args += " -v " + ":".join([results_root,results_root,"rw"])
+        
+    if tmp_dir != None: 
+        docker_args += " -v " + ":".join([tmp_dir,tmp_dir,"rw"])
+    else: # set the default value if the tmp-dir was unset
+        tmp_dir = "/tmp"
+        
     cwd = os.getcwd()
     docker_args += " -v " + ":".join([cwd,cwd,"rw"])
     docker_args += " -w " + cwd
@@ -199,8 +219,6 @@ if __name__ == '__main__':
     gatk = config.get('Tools','gatk')
     vcftools = config.get('Tools','vcftools')
 
-    # tmp dir
-    tmp_dir = config.get('Other','tmp-directory')
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
 
@@ -215,17 +233,23 @@ drmaa_session.initialize()
 
 from ruffus.drmaa_wrapper import run_job, error_drmaa_job
 
-def _run_cmd(cmd, run_locally=False):
+def _run_cmd(cmd, cpus, mem_per_cpu, run_locally):
     stdout, stderr = '', ''
+    job_options = '--ntasks=1 \
+                    --cpus-per-task={cpus} \
+                    --mem-per-cpu={mem} \
+                    '.format(cpus=cpus, mem=mem_per_cpu)
+                   
     try:
         stdout, stderr = run_job(cmd, 
+                                 job_other_options=job_options,
                                  run_locally = run_locally, 
                                  retain_job_scripts = True, job_script_directory = 'drmaa/',
                                  drmaa_session = drmaa_session)
     except error_drmaa_job as err:
         raise Exception("\n".join(map(str, ["Failed to run:", cmd, err, stdout, stderr])))
     
-def run_cmd(cmd, args, interpreter_args=None, run_locally=False, dockerize=True):
+def run_cmd(cmd, args, interpreter_args=None, cpus=1, mem_per_cpu=1024, run_locally=False, dockerize=True):
     
     if dockerize:
 
@@ -246,7 +270,7 @@ def run_cmd(cmd, args, interpreter_args=None, run_locally=False, dockerize=True)
             raise Exception('Not implemented interpreter args in not-dockerized execution.\nWhy would you want to do it anyway?')
             #full_cmd = "{cmd} \"{args}\" \"{iargs}\"".format(cmd=cmd, args=args, iargs=interpreter_args)
 
-    _run_cmd(full_cmd, run_locally)
+    _run_cmd(full_cmd, cpus, mem_per_cpu, run_locally)
 
 def rename(old_file, new_file):
     """rename file"""
@@ -437,7 +461,10 @@ def bcl2fastq_conversion(run_directory):
     """ Run bcl2fastq conversion and create fastq files in the run directory"""
     #log_file = os.path.join(run_directory,'Data','Intensities','BaseCalls','bcl2fastq.log')
     # r, w, d, and p specify numbers of threads to be used for each of the concurrent subtasks of the conversion (see bcl2fastq manual) 
-    run_cmd(bcl2fastq, "-R {dir} -r1 -w1 -d2 -p4".format(dir=run_directory))
+    #run_cmd(bcl2fastq, "-R {dir} -r1 -w1 -d2 -p4".format(dir=run_directory), cpus=8, mem_per_cpu=2048)
+    run_cmd(bcl2fastq, 
+            "-R {indir} -o {outdir} -r1 -w1 -d2 -p4".format(indir=run_directory, outdir=cwd), 
+            cpus=8, mem_per_cpu=2048)
 
 
 
@@ -473,19 +500,21 @@ def trim_reads(inputs, output):
     outfq1 = output
     outfq2 = output.replace('fq1.gz','fq2.gz')
     unpaired = [outfq1.replace('fq1.gz','fq1_unpaired.gz'), outfq2.replace('fq2.gz','fq2_unpaired.gz')]               
-    logfile = output.replace('fq1.gz','trimmomatic.log')
-    args = "PE -phred33 -threads 1 -trimlog {log} \
+    # logfile = output.replace('fq1.gz','trimmomatic.log')
+    # -trimlog {log} \
+    # log=logfile
+    args = "PE -phred33 -threads 1 \
             {in1} {in2} {out1} {unpaired1} {out2} {unpaired2} \
             MINLEN:36 \
             ILLUMINACLIP:{adapter}:2:30:10 \
             LEADING:3 \
             TRAILING:3 \
-            SLIDINGWINDOW:4:15".format(log=logfile,
-                                       in1=inputs[0], in2=inputs[1],
+            SLIDINGWINDOW:4:15".format(in1=inputs[0], in2=inputs[1],
                                        out1=outfq1, out2=outfq2,
                                        unpaired1=unpaired[0], unpaired2=unpaired[1],
                                        adapter=adapters)
-    run_cmd(trimmomatic, args, interpreter_args="")
+    max_mem = 2048
+    run_cmd(trimmomatic, args, interpreter_args="-Xmx"+str(max_mem)+"m", cpus=1, mem_per_cpu=max_mem)
 
 
 #
@@ -498,8 +527,11 @@ def trim_reads(inputs, output):
 #@collate(trim_reads, regex(r"([^_]+_[^_]+)\.fq[12]\.gz$"), r'\1.sam')
 @transform(trim_reads, suffix('.fq1.gz'), add_inputs(r'\1.fq2.gz'), '.sam')
 def align_reads(fastqs, sam):
-    args = "mem {ref} {fq1} {fq2} > {sam}".format(ref=reference, fq1=fastqs[0], fq2=fastqs[1], sam=sam)
-    run_cmd(bwa, args)
+    threads = 4
+    args = "mem -t {threads} {ref} {fq1} {fq2} > {sam} \
+            ".format(threads=theads, ref=reference, 
+                     fq1=fastqs[0], fq2=fastqs[1], sam=sam)
+    run_cmd(bwa, args, cpus=threads, mem_per_cpu=4096/threads)
     
 
 #
@@ -515,9 +547,9 @@ def merge_lanes(lane_sams, bam):
             ".format(bam=bam)
     # include all sam files as args
     for sam in lane_sams:
-        args += "O={sam} ".format(sam=sam)
+        args += " I={sam}".format(sam=sam)
         
-    run_cmd(picard, args, interpreter_args="-Xmx8g")
+    run_cmd(picard, args, interpreter_args="-Xmx8g", cpus=4, mem_per_cpu=2048)
     
 
 #
@@ -533,24 +565,18 @@ def generate_bam_inputs():
             yield job_parameters
 
 
-def clean_fastqs():
-    """ Remove the trimmed fastq files. Links to original fastqs are kept """
+def clean_fastqs_and_sam():
+    """ Remove the trimmed fastq files, and SAM files. Links to original fastqs are kept """
     run_cmd("rm -f */*.fq[12].gz", run_locally=True)
+    run_cmd("rm -f */*.sam", run_locally=True)
 
 
-@posttask(clean_fastqs)
+@posttask(clean_fastqs_and_sam)
 @transform(merge_lanes, suffix(".bam"), '.bam.bai')
 def index(bam, output):
     """Create raw bam index"""
     index_bam(bam)
 
-
-
-
-#
-# clean the fastq files if index succeeds
-#
-#
 
 
 #
@@ -603,7 +629,7 @@ def dup_removal_picard(bam,output):
            VALIDATION_STRINGENCY=LENIENT \
            VERBOSITY=ERROR CREATE_INDEX=TRUE \
            ".format(bam=bam, out=output)
-    run_cmd(picard, args, interpreter_args="-Xmx4g")
+    run_cmd(picard, args, interpreter_args="-Xmx4g", mem_per_cpu=4096)
    
 def dup_mark_picard(bam,output):
     """Use Picard to mark duplicates"""
@@ -617,7 +643,7 @@ def dup_mark_picard(bam,output):
             ".format(tmp=tmp_dir, 
                      bam=bam, 
                      out=output)
-    run_cmd(picard, args, interpreter_args="-Xmx4g")
+    run_cmd(picard, args, interpreter_args="-Xmx4g", mem_per_cpu=4096)
 
 
 @follows(index)
@@ -650,7 +676,7 @@ def find_realignment_intervals(foo, intervals, input_bam):
                              indels1=indels_1kg, 
                              indels2=mills, 
                              out=intervals)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096)
 
 
 #@follows(find_realignment_intervals)
@@ -669,7 +695,7 @@ def indel_realigner(intervals_file, realigned_bam, input_bam):
                              indels1=indels_1kg, 
                              indels2=mills, 
                              out=realigned_bam)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096)
 
 
 #@follows(indel_realigner)
@@ -685,7 +711,7 @@ def recalibrate_baseq1(input_bam, output):
                             dbsnp=dbsnp, 
                             bam=input_bam, 
                             out=output)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir, mem_per_cpu=6144)
     
 
 # This custom check ensures that the recalibrate_baseq2 step is not run in --rebuild_mode if the .gatk.bam exists
@@ -713,7 +739,7 @@ def recalibrate_baseq2(inputs, output_bam):
                                   bam=bam, 
                                   out=output_bam, 
                                   recal=recal_data) 
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096)
     
     # remove(inputs[0])
 
@@ -768,7 +794,7 @@ def reduce_bam(bam, output):
             -R %s \
             -I %s \
             -o %s" % (reference, bam, output)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir, mem_per_cpu=6144)
 
 
 def split_seq(seq, num_pieces):
@@ -791,7 +817,7 @@ def multisample_variant_call(bams, output):
     #log the results
     args = args + '&> {}.log'.format(output)
     
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
     
 def merge_batch_vcf(vcfs, output):
     """Merges vcf files from the batch run"""
@@ -808,7 +834,7 @@ def merge_batch_vcf(vcfs, output):
                                 reference=reference,
                                 output=output,
                                 files=merging),
-                interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir) 
+                interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096) 
 
 @merge(reduce_bam, 'multisample.gatk.vcf')
 def call_variants(infiles, output):
@@ -851,7 +877,7 @@ def call_haplotypes(bam, output_gvcf):
 
     #log the results
     #cmd = cmd + '&> {}.log'.format(output_gvcf)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir, mem_per_cpu=6144)
 
 
 @merge(call_haplotypes, 'multisample.gatk.gvcf')
@@ -865,7 +891,7 @@ def merge_gvcfs(gvcfs, merged_gvcf):
         args = args + " --variant {}".format(gvcf)
     
     args = args + '&> {}.log'.format(merged_gvcf)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096)
     
 
 @originate(call_with_gvcfs)
@@ -884,7 +910,7 @@ def genotype_gvcfs(gvcfs, output):
         args = args + " --variant {}".format(gvcf)
 
     args = args + '&> {}.log'.format(output)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
 
 
 #
@@ -907,7 +933,7 @@ def call_mt_haplotypes(bam, output_gvcf):
             -minPruning 4 \
             -L MT \
             --dbsnp %s " % (reference, bam, output_gvcf, dbsnp)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir, mem_per_cpu=6144)
 
 @merge(call_mt_haplotypes, 'multisample.gatk.mt.gvcf')
 def merge_mt_gvcfs(gvcfs, merged_gvcf):
@@ -918,7 +944,7 @@ def merge_mt_gvcfs(gvcfs, merged_gvcf):
         args = args + " --variant {}".format(gvcf)
     
     args = args + '&> {}.log'.format(merged_gvcf)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096)
     
 @merge([merge_mt_gvcfs], 'multisample.gatk.mt.vcf')
 def genotype_mt_gvcfs(gvcfs, output):
@@ -930,7 +956,7 @@ def genotype_mt_gvcfs(gvcfs, output):
         args = args + " --variant {}".format(gvcf)
 
     args = args + '&> {}.log'.format(output)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
 
 
 
@@ -974,7 +1000,7 @@ def find_snp_tranches_for_recalibration(vcf,outputs):
     if get_num_files() > 10:
         args += " -an InbreedingCoeff"
         
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir, cpus=options.jobs, mem_per_cpu=16386/options.jobs)
 
 
 @follows(find_snp_tranches_for_recalibration)
@@ -1005,7 +1031,7 @@ def find_indel_tranches_for_recalibration(vcf,outputs):
     if get_num_files() > 10:
         args += " -an InbreedingCoeff"
         
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir, cpus=options.jobs, mem_per_cpu=16386/options.jobs)
 
 
 def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP'):
@@ -1064,7 +1090,7 @@ def filter_variants(input_vcf, output_vcf):
                 reference=reference)
 
     # remove(input)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx12g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
 
 
 #@follows(filter_variants)
@@ -1082,7 +1108,7 @@ def remove_filtered(input_vcf, output_vcf):
                 output=output_vcf)
 
     # remove(input)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx12g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
     
 
 #@follows(remove_filtered)
@@ -1121,7 +1147,20 @@ def cleanup_files():
 #            multisample.gatk.analysisReady.vcf \
 
 
-@posttask(cleanup_files)
+def archive_results():
+    # if optional results_root was not provided - do nothing
+    if results_root == None: return
+    
+    run_name = os.path.basename(os.getcwd())
+    arch_path = os.path.join(results_root, run_name)
+    run_cmd("mkdir %s" % arch_path, run_locally=True)
+    run_cmd("cp */*.gatk.bam %s" % arch_path, run_locally=True)
+    run_cmd("cp */*.exome.vcf %s" % arch_path, run_locally=True)
+    run_cmd("cp multisample.gatk.gvcf %s" % os.path.join(results_root,run_name+".multisample.gatk.gvcf"),
+            run_locally=True)
+
+
+@posttask(cleanup_files, archive_results)
 @follows('final_calls')
 @files(split_snp_parameters)
 def split_snps(vcf, output, sample):
@@ -1142,7 +1181,7 @@ def split_snps(vcf, output, sample):
                      ad_thr=AD_threshold, 
                      dp_thr=DP_threshold)
             
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx2g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx2g" % tmp_dir, mem_per_cpu=2048)
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
