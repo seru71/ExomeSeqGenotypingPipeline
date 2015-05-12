@@ -572,8 +572,16 @@ def trim_reads(inputs, output):
 @transform(trim_reads, suffix('.fq1.gz'), add_inputs(r'\1.fq2.gz'), '.sam')
 def align_reads(fastqs, sam):
     threads = 1
-    args = "mem -t {threads} {ref} {fq1} {fq2} > {sam} \
-            ".format(threads=threads, ref=reference, 
+    
+    # construct read group information from fastq file name (assuming [SAMPLE_ID]_[LANE_ID].fq[1|2].gz format)
+    sample_lane = (fastqs[0])[0:-len(".fq1.gz")]
+    sample = "_".join(sample_lane.split("_")[0:-1])
+    lane = sample_lane.split("_")[-1]
+    read_group = "@RG\tID:{id}\tSM:{sm}\tLB:{lb}\tPL:{pl}\tPU:{pu} \
+                 ".format(id=sample_lane, sm=sample, lb=sample, pl="ILLUMINA", pu=lane)
+                 
+    args = "mem -t {threads} -R '{rg}' {ref} {fq1} {fq2} > {sam} \
+            ".format(threads=threads, rg=read_group, ref=reference, 
                      fq1=fastqs[0], fq2=fastqs[1], sam=sam)
     run_cmd(bwa, args, cpus=threads, mem_per_cpu=8192/threads)
     
