@@ -451,8 +451,8 @@ def get_sample_ids():
 def get_num_files():
     return len(get_sample_ids)
 
-def are_fastqs_missing(_,__):
-    fastqs = glob.glob(os.path.join(cwd,'*','*.fastq.gz'))
+def are_fastqs_converted(_,__):
+    fastqs = glob.glob(os.path.join(cwd,'*.fastq.gz'))
     print(fastqs)
 
     for fastq in fastqs:
@@ -465,7 +465,7 @@ def are_fastqs_missing(_,__):
 # Preprocess the reads, only if fastqs don't exist
 #
 @originate([input_dir])
-@check_if_uptodate(are_fastqs_missing)
+@check_if_uptodate(are_fastqs_converted)
 def bcl2fastq_conversion(run_directory):
     """ Run bcl2fastq conversion and create fastq files in the run directory"""
     # r, w, d, and p specify numbers of threads to be used for each of the concurrent subtasks of the conversion (see bcl2fastq manual) 
@@ -473,6 +473,7 @@ def bcl2fastq_conversion(run_directory):
     run_cmd(bcl2fastq, 
            "-R {indir} -o {outdir} -r1 -w1 -d2 -p4".format(indir=run_directory, outdir=cwd), 
           cpus=8, mem_per_cpu=2048)
+    # make a flag indicating that it finished fine and files are not truncated
 
 
 def archive_fastqs():
@@ -483,8 +484,17 @@ def archive_fastqs():
     run_name = os.path.basename(cwd)
     arch_path = os.path.join(fastq_archive, run_name)
     run_cmd("mkdir %s" % arch_path, run_locally=True)
-    run_cmd("cp -L */*.fastq.gz %s" % arch_path, run_locally=True)
+    run_cmd("cp */*.fastq.gz %s" % arch_path, run_locally=True)
 
+
+
+def need_fastqs_segregation(_,__):
+    fastqs_not_segregated = glob.glob(os.path.join(cwd,'*.fastq.gz'))
+    fastqs_segregated = glob.glob(os.path.join(cwd,'*','*.fastq.gz'))
+    
+    if len(fastqs_not_segregated)==0 and len(fastqs_segregated)>0: 
+        return False, 'All %s FASTQ files are segregated.' % len(fastqs_segregated)
+    return True, '%s FASTQ files needs segregation; %s is segregated' % (len(fastqs_not_segregated), len(fastqs_segregated)) 
 
 #
 # Prepare directory structure move in the input fastq files
@@ -494,7 +504,7 @@ def archive_fastqs():
 @jobs_limit(1)    # to avoid problems with simultanous creation of the same sample dir
 @posttask(archive_fastqs)
 @follows(bcl2fastq_conversion)
-#@subdivide(os.path.join(input_dir,'Data','Intensities','BaseCalls','*.fastq.gz'), 
+@check_if_uptodate(need_fastqs_segregation)
 @subdivide(os.path.join(cwd,'*.fastq.gz'),
            formatter('.+/(?P<SAMPLE_ID>[^_/]+)_S[1-9][0-9]?_L\d\d\d_R[12]_001\.fastq\.gz$'), 
            '{SAMPLE_ID[0]}/{basename[0]}{ext[0]}')
