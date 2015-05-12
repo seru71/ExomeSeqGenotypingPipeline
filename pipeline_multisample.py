@@ -452,13 +452,16 @@ def get_num_files():
     return len(get_sample_ids)
 
 def are_fastqs_converted(_,__):
-    fastqs = glob.glob(os.path.join(cwd,'fastqs','*.fastq.gz'))
-    print(fastqs)
+#    fastqs = glob.glob(os.path.join(cwd,'fastqs','*.fastq.gz'))
+#    print(fastqs)
 
-    for fastq in fastqs:
-        if not fastq.startswith('Undetermined'): 
-            return False, 'FASTQ file %s found. Skipping bcl2fastq conversion' % os.path.basename(fastq)
-    return True, 'No FASTQ files found'
+#    for fastq in fastqs:
+#        if not fastq.startswith('Undetermined'): 
+#            return False, 'FASTQ file %s found. Skipping bcl2fastq conversion' % os.path.basename(fastq)
+#   return True, 'No FASTQ files found'
+    if os.path.exists(os.path.join(cwd,'fastqs','completed')):
+        return False, 'Found bcl2fastq completion flag'
+    return True, 'Missing bcl2fastq completion flag'
 
 
 #
@@ -477,7 +480,9 @@ def bcl2fastq_conversion(run_directory):
     run_cmd(bcl2fastq, 
            "-R {indir} -o {outdir} -r1 -w1 -d2 -p4".format(indir=run_directory, outdir=out_dir), 
           cpus=8, mem_per_cpu=2048)
-    # make a flag indicating that it finished fine and files are not truncated
+    # touch a flag indicating that it has finished conversion
+    open(os.path.join(out_dir,'completed'),'w').close()
+
 
 
 def archive_fastqs():
