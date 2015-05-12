@@ -452,7 +452,7 @@ def get_num_files():
     return len(get_sample_ids)
 
 def are_fastqs_converted(_,__):
-    fastqs = glob.glob(os.path.join(cwd,'*.fastq.gz'))
+    fastqs = glob.glob(os.path.join(cwd,'fastqs','*.fastq.gz'))
     print(fastqs)
 
     for fastq in fastqs:
@@ -468,10 +468,14 @@ def are_fastqs_converted(_,__):
 @check_if_uptodate(are_fastqs_converted)
 def bcl2fastq_conversion(run_directory):
     """ Run bcl2fastq conversion and create fastq files in the run directory"""
+    out_dir = os.path.join(cwd,'fastqs')
+    if not os.path.exists(out_dir):
+        os.mkdir(out_dir) 
+
     # r, w, d, and p specify numbers of threads to be used for each of the concurrent subtasks of the conversion (see bcl2fastq manual) 
     #run_cmd(bcl2fastq, "-R {dir} -r1 -w1 -d2 -p4".format(dir=run_directory), cpus=8, mem_per_cpu=2048)
     run_cmd(bcl2fastq, 
-           "-R {indir} -o {outdir} -r1 -w1 -d2 -p4".format(indir=run_directory, outdir=cwd), 
+           "-R {indir} -o {outdir} -r1 -w1 -d2 -p4".format(indir=run_directory, outdir=out_dir), 
           cpus=8, mem_per_cpu=2048)
     # make a flag indicating that it finished fine and files are not truncated
 
@@ -483,8 +487,11 @@ def archive_fastqs():
 
     run_name = os.path.basename(cwd)
     arch_path = os.path.join(fastq_archive, run_name)
-    run_cmd("mkdir %s" % arch_path, run_locally=True)
-    run_cmd("cp */*.fastq.gz %s" % arch_path, run_locally=True)
+    os.mkdir(arch_path)
+    import shutil
+    shutil.copytree(os.path.join(cwd,'fastqs'), arch_path)
+    for f in glob.glob(os.path.join(arch_path,'*.fastq.gz')):
+        os.symlink(f, os.path.join(cwd,'fastqs',os.path.basename(f)))
 
 
 
@@ -504,16 +511,16 @@ def need_fastqs_segregation(_,__):
 @jobs_limit(1)    # to avoid problems with simultanous creation of the same sample dir
 @posttask(archive_fastqs)
 @follows(bcl2fastq_conversion)
-@check_if_uptodate(need_fastqs_segregation)
-@subdivide(os.path.join(cwd,'*.fastq.gz'),
+#@check_if_uptodate(need_fastqs_segregation)
+@subdivide(os.path.join(cwd,'fastqs','*.fastq.gz'),
            formatter('.+/(?P<SAMPLE_ID>[^_/]+)_S[1-9][0-9]?_L\d\d\d_R[12]_001\.fastq\.gz$'), 
            '{SAMPLE_ID[0]}/{basename[0]}{ext[0]}')
-def segregate_fastqs(fastq_in, fastq_out):
+def link_fastqs(fastq_in, fastq_out):
     """Make working directory for every sample and move fastq files in"""
     if not os.path.exists(os.path.dirname(fastq_out)):
         os.mkdir(os.path.dirname(fastq_out))
     if not os.path.exists(fastq_out):
-        os.rename(fastq_in, fastq_out) 
+        os.symlink(fastq_in, fastq_out) 
 
     
     
@@ -525,7 +532,7 @@ def segregate_fastqs(fastq_in, fastq_out):
 #    [SAMPLE_ID]_[LANE_ID].fq1.gz
 #    [SAMPLE_ID]_[LANE_ID].fq2.gz
 #
-@collate(segregate_fastqs, regex(r'([^_]+)_S[1-9]\d?_(L\d\d\d)_R[12]_001\.fastq\.gz$'),  r'\1_\2.fq1.gz')
+@collate(link_fastqs, regex(r'([^_]+)_S[1-9]\d?_(L\d\d\d)_R[12]_001\.fastq\.gz$'),  r'\1_\2.fq1.gz')
 def trim_reads(inputs, output):
     outfq1 = output
     outfq2 = output.replace('fq1.gz','fq2.gz')
