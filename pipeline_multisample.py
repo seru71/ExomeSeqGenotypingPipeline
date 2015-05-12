@@ -492,7 +492,9 @@ def archive_fastqs():
 
     run_name = os.path.basename(cwd)
     arch_path = os.path.join(fastq_archive, run_name)
-    os.mkdir(arch_path)
+    if not os.path.exists(arch_path):
+        os.mkdir(arch_path)
+
     import shutil
     shutil.copytree(os.path.join(cwd,'fastqs'), arch_path)
     for f in glob.glob(os.path.join(arch_path,'*.fastq.gz')):
@@ -609,8 +611,10 @@ def generate_bam_inputs():
 
 def clean_fastqs_and_sam():
     """ Remove the trimmed fastq files, and SAM files. Links to original fastqs are kept """
-    run_cmd("rm -f */*.fq[12].gz", run_locally=True)
-    run_cmd("rm -f */*.sam", run_locally=True)
+    for f in glob.glob(os.path.join(cmd,'*','*.fq[12]*.gz')):
+        os.remove(f)
+    for f in glob.glob(os.path.join(cmd,'*','*.sam')):
+        os.remove(f)
 
 
 @posttask(clean_fastqs_and_sam)
@@ -864,7 +868,7 @@ def multisample_variant_call(bams, output):
 def merge_batch_vcf(vcfs, output):
     """Merges vcf files from the batch run"""
     if len(vcfs) == 1:
-        run_cmd('cp {vcf} {output}'.format(vcf = vcfs[0], output = output), run_locally=True)
+        run_cmd("cp {vcf} {output}".format(vcf = vcfs[0], output = output),"", run_locally=True)
     else:
         merging = ''
         for i in range(len(vcfs)):
@@ -1184,7 +1188,7 @@ def cleanup_files():
             multisample.gatk.indel.model.* multisample.gatk.snp.model.* \
             multisample.gatk.analysisReady.vcf.vcfidx \
             multisample.gatk.analysisReady.vcf.idx \
-            multisample.gatk.recalibratedSNPS.rawIndels.vcf.idx",
+            multisample.gatk.recalibratedSNPS.rawIndels.vcf.idx","",
             run_locally=True)
 #            multisample.gatk.analysisReady.vcf \
 
@@ -1195,11 +1199,11 @@ def archive_results():
     
     run_name = os.path.basename(os.getcwd())
     arch_path = os.path.join(results_archive, run_name)
-    run_cmd("mkdir %s" % arch_path, run_locally=True)
-    run_cmd("cp */*.gatk.bam %s" % arch_path, run_locally=True)
-    run_cmd("cp */*.exome.vcf %s" % arch_path, run_locally=True)
+    if not os.path.exists(arch_path): os.mkdir(arch_path)
+    run_cmd("cp */*.gatk.bam %s" % arch_path, "", run_locally=True)
+    run_cmd("cp */*.exome.vcf %s" % arch_path, "", run_locally=True)
     run_cmd("cp multisample.gatk.gvcf %s" % os.path.join(results_archive,run_name+".multisample.gatk.gvcf"),
-            run_locally=True)
+            "", run_locally=True)
 
 
 @posttask(cleanup_files, archive_results)
