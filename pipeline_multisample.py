@@ -6,11 +6,12 @@
                         [--log_file PATH]
                         [--verbose]
                         [--target_tasks]
-                        [--jobs]
+                        [--jobs N]
                         [--just_print]
                         [--flowchart]
                         [--key_legend_in_graph]
                         [--forced_tasks]
+                        [--run_on_bcl_tile TILE_REGEX]
 
 """
 import sys
@@ -88,6 +89,11 @@ if __name__ == '__main__':
     parser.add_option("--rebuild_mode", dest="rebuild_mode",
                         action="store_false", default=True,
                         help="gnu_make_maximal_rebuild_mode")
+    parser.add_option("--run_on_bcl_tile", dest="run_on_bcl_tile",
+                        type="string", 
+                        default=None,
+                        help="Use only this tile when doing bcl2fastq conversion. For testing purposes.")
+    
 
     # get help string
     f =StringIO.StringIO()
@@ -476,10 +482,11 @@ def bcl2fastq_conversion(run_directory):
         os.mkdir(out_dir) 
 
     # r, w, d, and p specify numbers of threads to be used for each of the concurrent subtasks of the conversion (see bcl2fastq manual) 
-    #run_cmd(bcl2fastq, "-R {dir} -r1 -w1 -d2 -p4".format(dir=run_directory), cpus=8, mem_per_cpu=2048)
-    run_cmd(bcl2fastq, 
-           "-R {indir} -o {outdir} -r1 -w1 -d2 -p4".format(indir=run_directory, outdir=out_dir), 
-          cpus=8, mem_per_cpu=2048)
+    args = "-R {indir} -o {outdir} -r1 -w1 -d2 -p4".format(indir=run_directory, outdir=out_dir)
+    if options.run_on_bcl_tile != None:
+        args += " --tiles %s" % options.run_on_bcl_tile
+    run_cmd(bcl2fastq, args, cpus=8, mem_per_cpu=2048)
+    
     # touch a flag indicating that it has finished conversion
     open(os.path.join(out_dir,'completed'),'w').close()
 
