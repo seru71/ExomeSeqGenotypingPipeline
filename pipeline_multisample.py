@@ -478,11 +478,13 @@ def are_fastqs_converted(_,__):
 def bcl2fastq_conversion(run_directory):
     """ Run bcl2fastq conversion and create fastq files in the run directory"""
     out_dir = os.path.join(cwd,'fastqs')
+    interop_dir = os.path.join(out_dir,'InterOp')
     if not os.path.exists(out_dir):
         os.mkdir(out_dir) 
 
     # r, w, d, and p specify numbers of threads to be used for each of the concurrent subtasks of the conversion (see bcl2fastq manual) 
-    args = "-R {indir} -o {outdir} -r1 -w1 -d2 -p4".format(indir=run_directory, outdir=out_dir)
+    args = "-R {indir} -o {outdir} --interop-dir={interopdir} -r1 -w1 -d2 -p4 \
+            ".format(indir=run_directory, outdir=out_dir, interopdir=interop_dir)
     if options.run_on_bcl_tile != None:
         args += " --tiles %s" % options.run_on_bcl_tile
     run_cmd(bcl2fastq, args, cpus=8, mem_per_cpu=2048)
@@ -578,13 +580,13 @@ def trim_reads(inputs, output):
 #@collate(trim_reads, regex(r"([^_]+_[^_]+)\.fq[12]\.gz$"), r'\1.sam')
 @transform(trim_reads, suffix('.fq1.gz'), add_inputs(r'\1.fq2.gz'), '.sam')
 def align_reads(fastqs, sam):
-    threads = 1
+    threads = 2
     
     # construct read group information from fastq file name (assuming [SAMPLE_ID]_[LANE_ID].fq[1|2].gz format)
-    sample_lane = (fastqs[0])[0:-len(".fq1.gz")]
+    sample_lane = os.path.basename(fastqs[0])[0:-len(".fq1.gz")]
     sample = "_".join(sample_lane.split("_")[0:-1])
     lane = sample_lane.split("_")[-1]
-    read_group = "@RG\tID:{id}\tSM:{sm}\tLB:{lb}\tPL:{pl}\tPU:{pu} \
+    read_group = "@RG\\tID:{id}\\tSM:{sm}\\tLB:{lb}\\tPL:{pl}\\tPU:{pu} \
                  ".format(id=sample_lane, sm=sample, lb=sample, pl="ILLUMINA", pu=lane)
                  
     args = "mem -t {threads} -R '{rg}' {ref} {fq1} {fq2} > {sam} \
@@ -626,9 +628,9 @@ def generate_bam_inputs():
 
 def clean_fastqs_and_sam():
     """ Remove the trimmed fastq files, and SAM files. Links to original fastqs are kept """
-    for f in glob.glob(os.path.join(cmd,'*','*.fq[12]*.gz')):
+    for f in glob.glob(os.path.join(cwd,'*','*.fq[12]*.gz')):
         os.remove(f)
-    for f in glob.glob(os.path.join(cmd,'*','*.sam')):
+    for f in glob.glob(os.path.join(cwd,'*','*.sam')):
         os.remove(f)
 
 
@@ -748,8 +750,8 @@ def indel_realigner(intervals_file, realigned_bam, input_bam):
             -I {bam} \
             -R {reference} \
             -targetIntervals {intervals} \
-            -known indels1 \
-            -known indels2 \
+            -known {indels1} \
+            -known {indels2} \
             -o {out}".format(bam=input_bam, 
                              reference=reference, 
                              intervals=intervals_file, 
