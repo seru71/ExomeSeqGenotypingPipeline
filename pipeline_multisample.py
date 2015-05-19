@@ -473,8 +473,9 @@ def are_fastqs_converted(_,__):
 #
 # Preprocess the reads, only if fastqs don't exist
 #
-@originate([input_dir])
-@check_if_uptodate(are_fastqs_converted)
+@files(input_dir, os.path.join(cwd,'fastqs','completed'))
+#@check_if_uptodate(are_fastqs_converted)
+@posttask(touch_file(os.path.join(cwd,'fastqs','completed')))
 def bcl2fastq_conversion(run_directory):
     """ Run bcl2fastq conversion and create fastq files in the run directory"""
     out_dir = os.path.join(cwd,'fastqs')
@@ -490,34 +491,28 @@ def bcl2fastq_conversion(run_directory):
     run_cmd(bcl2fastq, args, cpus=8, mem_per_cpu=2048)
     
     # touch a flag indicating that it has finished conversion
-    open(os.path.join(out_dir,'completed'),'w').close()
+    #open(os.path.join(out_dir,'completed'),'w').close()
 
-
-
-def archive_fastqs():
+@active_if(fastq_archive != None)
+@transform(bcl2fastq_conversion, formatter(".+/?P<RUN_ID>/fastqs/completed"), os.path.join(fastq_archive,'{RUN_ID[0]}'))
+def archive_fastqs(input, archive_dir):
     """ Archive fastqs """
     # if optional fastq-archive-root was not provided - do nothing
-    if fastq_archive == None: return
+    #if fastq_archive == None: return
+    
+    fq_dir = os.path.dirname(input)
 
-    run_name = os.path.basename(cwd)
-    arch_path = os.path.join(fastq_archive, run_name)
-    if not os.path.exists(arch_path):
-        os.mkdir(arch_path)
+#    run_name = os.path.basename(cwd)
+#    arch_path = os.path.join(fastq_archive, run_name)
+#    if not os.path.exists(arch_path):
+#        os.mkdir(arch_path)
 
     import shutil
-    shutil.copytree(os.path.join(cwd,'fastqs'), arch_path)
-    for f in glob.glob(os.path.join(arch_path,'*.fastq.gz')):
-        os.symlink(f, os.path.join(cwd,'fastqs',os.path.basename(f)))
+    shutil.move(fq_dir, archive_dir)
+    os.mkdir(fq_dir)
+    for f in glob.glob(os.path.join(archive_dir,'*.fastq.gz')):
+        os.symlink(f, os.path.join(fq_dir,os.path.basename(f)))
 
-
-
-def need_fastqs_segregation(_,__):
-    fastqs_not_segregated = glob.glob(os.path.join(cwd,'*.fastq.gz'))
-    fastqs_segregated = glob.glob(os.path.join(cwd,'*','*.fastq.gz'))
-    
-    if len(fastqs_not_segregated)==0 and len(fastqs_segregated)>0: 
-        return False, 'All %s FASTQ files are segregated.' % len(fastqs_segregated)
-    return True, '%s FASTQ files needs segregation; %s is segregated' % (len(fastqs_not_segregated), len(fastqs_segregated)) 
 
 #
 # Prepare directory structure move in the input fastq files
@@ -525,9 +520,7 @@ def need_fastqs_segregation(_,__):
 #    /path/to/file/[SAMPLE_ID]_[anything_except_path_delimiter].fastq.gz
 #
 @jobs_limit(1)    # to avoid problems with simultanous creation of the same sample dir
-@posttask(archive_fastqs)
-@follows(bcl2fastq_conversion)
-#@check_if_uptodate(need_fastqs_segregation)
+@follows(archive_fastqs)
 @subdivide(os.path.join(cwd,'fastqs','*.fastq.gz'),
            formatter('.+/(?P<SAMPLE_ID>[^_/]+)_S[1-9][0-9]?_L\d\d\d_R[12]_001\.fastq\.gz$'), 
            '{SAMPLE_ID[0]}/{basename[0]}{ext[0]}')
@@ -725,9 +718,10 @@ def index_dups(bam, output):
     index_bam(bam)
 
 
-#@follows(index_dups)
-@transform(index_dups, suffix(".dedup.bam.bai"), '.realign.intervals', r'\1.dedup.bam')
-def find_realignment_intervals(foo, intervals, input_bam):
+#@transform(index_dups, suffix(".dedup.bam.bai"), '.realign.intervals', r'\1.dedup.bam')
+#def find_realignment_intervals(foo, intervals, input_bam):
+@transform(remove_dups, suffix(".dedup.bam"), '.realign.intervals')
+def find_realignment_intervals(input_bam, intervals):
     """ Generate realignment intervals """
     args = "-T RealignerTargetCreator \
             -I {bam} \
@@ -742,9 +736,10 @@ def find_realignment_intervals(foo, intervals, input_bam):
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096)
 
 
-#@follows(find_realignment_intervals)
-@transform(find_realignment_intervals, suffix(".realign.intervals"), '.realigned.bam', r'\1.dedup.bam')
-def indel_realigner(intervals_file, realigned_bam, input_bam):
+@transform(find_realignment_intervals, suffix(".realign.intervals"), add_inputs(r'\1.dedup.bam'), '.realigned.bam')
+def indel_realigner(inputs, realigned_bam):
+    intervals_file = inputs[0]
+    input_bam = inputs[1]
     """Re-aligns regions around indels"""
     args = "-T IndelRealigner \
             -I {bam} \
@@ -761,11 +756,10 @@ def indel_realigner(intervals_file, realigned_bam, input_bam):
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096)
 
 
-#@follows(indel_realigner)
 @transform(indel_realigner, suffix('.realigned.bam'), '.gatk.bam.recal_data.grp')
 def recalibrate_baseq1(input_bam, output):
     """Base quality score recalibration in bam file - first pass """
-    index_bam(input_bam)
+    #index_bam(input_bam)
     args = "-T BaseRecalibrator \
            -R {reference} \
            -knownSites {dbsnp} \
@@ -953,7 +947,7 @@ def merge_gvcfs(gvcfs, merged_gvcf):
     for gvcf in gvcfs:
         args = args + " --variant {}".format(gvcf)
     
-    args = args + '&> {}.log'.format(merged_gvcf)
+    args = args + " &> {}.log".format(merged_gvcf)
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096)
     
 
