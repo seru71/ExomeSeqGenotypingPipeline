@@ -837,79 +837,6 @@ def gatk_bam_qc():
     pass
 
 
-
-#
-#
-# Bam reduce & (batch) variant calling using UnifiedGenotyper
-#
-
-
-@jobs_limit(6)
-#@follows(recalibrate_baseq2)
-@transform(recalibrate_baseq2, suffix('.gatk.bam'), '.reduced.bam')
-def reduce_bam(bam, output):
-    """Reduces the BAM file using read based compression that keeps only essential information for variant calling"""
-    args = "-T ReduceReads \
-            -R %s \
-            -I %s \
-            -o %s" % (reference, bam, output)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir, mem_per_cpu=6144)
-
-
-def split_seq(seq, num_pieces):
-    """ split a list into pieces passed as param """
-    start = 0
-    for i in xrange(num_pieces):
-        stop = start + len(seq[i::num_pieces])
-        yield seq[start:stop]
-        start = stop
-
-def multisample_variant_call(bams, output):
-    """Perform multi-sample variant calling using GATK"""
-    args = "-T UnifiedGenotyper \
-            -R {} \
-            -o {} \
-            -glm BOTH \
-            --dbsnp {} ".format(reference, output, dbsnp)
-    for bam in bams:
-        args = args + '-I {} '.format(bam)
-    #log the results
-    args = args + '&> {}.log'.format(output)
-    
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
-    
-def merge_batch_vcf(vcfs, output):
-    """Merges vcf files from the batch run"""
-    if len(vcfs) == 1:
-        run_cmd("cp {vcf} {output}".format(vcf = vcfs[0], output = output),"", run_locally=True)
-    else:
-        merging = ''
-        for i in range(len(vcfs)):
-            merging = merging + ' -V:batch{number} {file}'.format(number=i,file=vcfs[i])
-        run_cmd(gatk, "-R {reference} \
-                        -T CombineVariants \
-                        -o {output} \
-                        {files}".format(
-                                reference=reference,
-                                output=output,
-                                files=merging),
-                interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096) 
-
-@merge(reduce_bam, 'multisample.gatk.vcf')
-def call_variants(infiles, output):
-    """Splits the files into s number of batches, calls the variants, and merges them back"""
-    #splits the calculations into batches
-    counter = 1
-    batches = []
-    for batch in split_seq(infiles, options.groups):
-        multisample_variant_call(batch, 'batch{}.vcf'.format(counter))
-        batches.append('batch{}.vcf'.format(counter))
-        counter += 1
-    merge_batch_vcf(batches,output)
-    for batch in batches:
-        remove(batch)
-        remove(batch + '.idx')
-
 #
 #
 # Genotyping using HaplotypeCaller
@@ -1117,16 +1044,13 @@ def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP',t
 @follows(find_indel_tranches_for_recalibration)
 @files(['multisample.gatk.vcf','multisample.gatk.snp.model','multisample.gatk.snp.model.tranches'],'multisample.gatk.recalibratedSNPS.rawIndels.vcf')
 def apply_recalibration_filter_snps(inputs,output):
-    apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='SNP',99.9)
-    # remove(input[0])
-    #     remove(input[1])
-    #     remove(input[2])
+    apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='SNP',tranche_filter=99.9)
 
 
 @follows(apply_recalibration_filter_snps)
 @files(['multisample.gatk.recalibratedSNPS.rawIndels.vcf','multisample.gatk.indel.model','multisample.gatk.indel.model.tranches'],'multisample.gatk.preHardFiltering.vcf')
 def apply_recalibration_filter_indels(inputs,output):
-    apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='INDEL',99.0)
+    apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='INDEL',tranche_filter=99.0)
 
 
 #@follows(apply_recalibration_filter_indels)
@@ -1150,8 +1074,6 @@ def filter_variants(input_vcf, output_vcf):
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
 
 
-#@follows(filter_variants)
-#@files('multisample.gatk.markedHardFiltering.vcf', 'multisample.gatk.analysisReady.vcf')
 @transform(filter_variants, suffix('.markedHardFiltering.vcf'), '.analysisReady.vcf')
 def remove_filtered(input_vcf, output_vcf):
     """Remove filtered variants"""
@@ -1168,20 +1090,23 @@ def remove_filtered(input_vcf, output_vcf):
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
     
 
-#@follows(remove_filtered)
 @transform(remove_filtered, suffix('.analysisReady.vcf'),'.analysisReady.exome.vcf')
-def final_calls(vcf, output):
+def final_calls(input_vcf, output):
     """ Produce the final variant calls in the exome regions """
     output = output[:-10]
-    # apply filters to the vcf file to limit calling to exome region    
-    args = "--vcf {vcf} \
-            --out {out} \
-            --recode \
-            --bed {bed} \
-            --keep-INFO-all \
-            ".format(vcf=vcf, out=output, bed=exome)
-    run_cmd(vcftools, args)
-    rename('multisample.gatk.analysisReady.recode.vcf','multisample.gatk.analysisReady.exome.vcf')
+    
+    args = "-T SelectVariants \
+            -R {reference} \
+            --variant {input} \
+            -o {output} \
+            -L {exome}".format(
+                reference=reference,
+                input=input_vcf,
+                output=output_vcf,
+                exome)
+
+    # remove(input)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
 
 
 def split_snp_parameters():
