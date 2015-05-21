@@ -446,16 +446,17 @@ def get_sample_ids():
     #files = glob.glob(input_bams)
     #return [ os.path.splitext(os.path.basename(f))[0] for f in files ]
     
-    files = glob.glob(os.path.join(input_dir,'*.bcl'))
+    files = glob.glob(os.path.join(cwd,'*','*.gvcf'))
+    return [ os.path.splitext(os.path.basename(f))[0] for f in files ]
     # expect files in form /path/to/data/dir/[SAMPLE_ID]_[LANE_ID]_R[1|2]_001.bcl
     # and return a list of unique sorted SAMPLE_IDs
-    ids = [ (os.path.splitext(os.path.basename(f))[0]).split('_')[0] for f in files ]
-    uniq_ids = list(set(ids))
-    uniq_ids.sort()
-    return uniq_ids
+   # ids = [ (os.path.splitext(os.path.basename(f))[0]).split('_')[0] for f in files ]
+   # uniq_ids = list(set(ids))
+   # uniq_ids.sort()
+   # return uniq_ids
 
 def get_num_files():
-    return len(get_sample_ids)
+    return len(get_sample_ids())
 
 def are_fastqs_converted(_,__):
 #    fastqs = glob.glob(os.path.join(cwd,'fastqs','*.fastq.gz'))
@@ -494,7 +495,8 @@ def bcl2fastq_conversion(run_directory):
     #open(os.path.join(out_dir,'completed'),'w').close()
 
 @active_if(fastq_archive != None)
-@transform(bcl2fastq_conversion, formatter(".+/?P<RUN_ID>/fastqs/completed"), os.path.join(fastq_archive,'{RUN_ID[0]}'))
+#@transform(bcl2fastq_conversion, formatter(".+/?P<RUN_ID>/fastqs/completed"), os.path.join(fastq_archive,'{RUN_ID[0]}'))
+@transform(bcl2fastq_conversion, formatter(".+/(?P<RUN_ID>[^/]+)/fastqs/completed"), str(fastq_archive) + '/{RUN_ID[0]}')
 def archive_fastqs(input, archive_dir):
     """ Archive fastqs """
     # if optional fastq-archive-root was not provided - do nothing
@@ -931,9 +933,8 @@ def call_haplotypes(bam, output_gvcf):
                      gvcf=output_gvcf, 
                      target=exome, 
                      dbsnp=dbsnp)
+#             -log {gvcf}.log \
 
-    #log the results
-    #cmd = cmd + '&> {}.log'.format(output_gvcf)
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir, mem_per_cpu=6144)
 
 
@@ -942,12 +943,12 @@ def merge_gvcfs(gvcfs, merged_gvcf):
     """Combine the per-sample GVCF files into one project-wide GVCF""" 
     args = "-T CombineGVCFs \
             -R {reference} \
-            -o {out} ".format(reference=reference, out=merged_gvcf)
+            -o {out} \
+            -log {out}.log".format(reference=reference, out=merged_gvcf)
        
     for gvcf in gvcfs:
         args = args + " --variant {}".format(gvcf)
     
-    args = args + " &> {}.log".format(merged_gvcf)
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096)
     
 
@@ -960,13 +961,13 @@ def genotype_gvcfs(gvcfs, output):
     """ Genotype this project's merged GVCF together with other project-wide GVCF files (provided in settings) """
     args = "-T GenotypeGVCFs \
             -R {reference} \
-            -o {out} ".format(reference=reference, out=output)
+            -o {out} \
+            -log {out}.log".format(reference=reference, out=output)
 
     # if there are any external gvcfs to call with, include them
     for gvcf in gvcfs:
         args = args + " --variant {}".format(gvcf)
 
-    args = args + '&> {}.log'.format(output)
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
 
 
@@ -995,24 +996,22 @@ def call_mt_haplotypes(bam, output_gvcf):
 @merge(call_mt_haplotypes, 'multisample.gatk.mt.gvcf')
 def merge_mt_gvcfs(gvcfs, merged_gvcf):
     """Combine the per-sample GVCF files into one project-wide GVCF""" 
-    args = "-T CombineGVCFs -R %s -o %s" % (reference, merged_gvcf)
+    args = "-T CombineGVCFs -R {ref} -o {out} -log {out}.log".format(ref=reference, out=merged_gvcf)
        
     for gvcf in gvcfs:
         args = args + " --variant {}".format(gvcf)
     
-    args = args + '&> {}.log'.format(merged_gvcf)
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096)
     
 @merge([merge_mt_gvcfs], 'multisample.gatk.mt.vcf')
 def genotype_mt_gvcfs(gvcfs, output):
     """ Genotype this project's merged GVCF together with other project-wide GVCF files (provided in settings) """
-    args = "-T GenotypeGVCFs -R %s -o %s " % (reference, output)
+    args = "-T GenotypeGVCFs -R {ref} -o {out} -log {out}.log".format(ref=reference, out=output)
 
     # if there are any external gvcfs to call with, include them
     for gvcf in gvcfs:
         args = args + " --variant {}".format(gvcf)
 
-    args = args + '&> {}.log'.format(output)
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
 
 
@@ -1091,12 +1090,12 @@ def find_indel_tranches_for_recalibration(vcf,outputs):
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir, cpus=options.jobs, mem_per_cpu=16386/options.jobs)
 
 
-def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP'):
+def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP',tranche_filter=99.9):
     """Apply the recalibration tranch file to either snps or indels (depending on mode=SNP or mode=INDEL"""
     args = "-T ApplyRecalibration \
             -R {reference} \
             -input {vcf} \
-            --ts_filter_level 99.9 \
+            --ts_filter_level {tranche_filter} \
             -tranchesFile {tranches}  \
             -recalFile {recal} \
             -mode {mode} \
@@ -1104,6 +1103,7 @@ def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP'):
             -o {output}".format(
                 reference=reference,
                 vcf=vcf,
+                tranche_filter=tranche_filter,
                 tranches=tranches,
                 recal=recal,
                 mode=mode,
@@ -1117,7 +1117,7 @@ def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP'):
 @follows(find_indel_tranches_for_recalibration)
 @files(['multisample.gatk.vcf','multisample.gatk.snp.model','multisample.gatk.snp.model.tranches'],'multisample.gatk.recalibratedSNPS.rawIndels.vcf')
 def apply_recalibration_filter_snps(inputs,output):
-    apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='SNP')
+    apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='SNP',99.9)
     # remove(input[0])
     #     remove(input[1])
     #     remove(input[2])
@@ -1126,7 +1126,7 @@ def apply_recalibration_filter_snps(inputs,output):
 @follows(apply_recalibration_filter_snps)
 @files(['multisample.gatk.recalibratedSNPS.rawIndels.vcf','multisample.gatk.indel.model','multisample.gatk.indel.model.tranches'],'multisample.gatk.preHardFiltering.vcf')
 def apply_recalibration_filter_indels(inputs,output):
-    apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='INDEL')
+    apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='INDEL',99.0)
 
 
 #@follows(apply_recalibration_filter_indels)
