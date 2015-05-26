@@ -898,53 +898,6 @@ def genotype_gvcfs(gvcfs, output):
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
 
 
-#
-#
-# Genotyping mtDNA
-#
-
-
-@transform(recalibrate_baseq2, suffix('.gatk.bam'), '.mt.gvcf')
-def call_mt_haplotypes(bam, output_gvcf):
-    """Perform variant calling using GATK HaplotypeCaller"""
-    args = "nice %s -Xmx6g -jar %s \
-            -T HaplotypeCaller \
-            -R %s \
-            -I %s \
-            -o %s \
-            --emitRefConfidence GVCF \
-            --variant_index_type LINEAR \
-            --variant_index_parameter 128000 \
-            -minPruning 4 \
-            -L MT \
-            --dbsnp %s " % (reference, bam, output_gvcf, dbsnp)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir, mem_per_cpu=6144)
-
-@merge(call_mt_haplotypes, 'multisample.gatk.mt.gvcf')
-def merge_mt_gvcfs(gvcfs, merged_gvcf):
-    """Combine the per-sample GVCF files into one project-wide GVCF""" 
-    args = "-T CombineGVCFs -R {ref} -o {out} -log {out}.log".format(ref=reference, out=merged_gvcf)
-       
-    for gvcf in gvcfs:
-        args = args + " --variant {}".format(gvcf)
-    
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096)
-    
-@merge([merge_mt_gvcfs], 'multisample.gatk.mt.vcf')
-def genotype_mt_gvcfs(gvcfs, output):
-    """ Genotype this project's merged GVCF together with other project-wide GVCF files (provided in settings) """
-    args = "-T GenotypeGVCFs -R {ref} -o {out} -log {out}.log".format(ref=reference, out=output)
-
-    # if there are any external gvcfs to call with, include them
-    for gvcf in gvcfs:
-        args = args + " --variant {}".format(gvcf)
-
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
-
-
-
-
-
 
 #
 #
@@ -1048,49 +1001,12 @@ def apply_recalibration_filter_snps(inputs,output):
 
 
 @follows(apply_recalibration_filter_snps)
-@files(['multisample.gatk.recalibratedSNPS.rawIndels.vcf','multisample.gatk.indel.model','multisample.gatk.indel.model.tranches'],'multisample.gatk.preHardFiltering.vcf')
+@files(['multisample.gatk.recalibratedSNPS.rawIndels.vcf','multisample.gatk.indel.model','multisample.gatk.indel.model.tranches'],'multisample.gatk.recalibrated.vcf')
 def apply_recalibration_filter_indels(inputs,output):
     apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='INDEL',tranche_filter=99.0)
-
-
-#@follows(apply_recalibration_filter_indels)
-#@files('multisample.gatk.preHardFiltering.vcf', 'multisample.gatk.markedHardFiltering.vcf')
-@transform(apply_recalibration_filter_indels, suffix('.preHardFiltering.vcf'), '.markedHardFiltering.vcf')
-def filter_variants(input_vcf, output_vcf):
-    """docstring for apply_indel_filter"""
-    args = "-T VariantFiltration \
-            -o {output} \
-            --variant {input} \
-            --filterExpression 'QD < 3.0' \
-            --filterExpression 'DP < 6' \
-            --filterName QDFilter   \
-            --filterName DPFilter   \
-            -R {reference}".format(
-                output=output_vcf,
-                input=input_vcf,
-                reference=reference)
-
-    # remove(input)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
-
-
-@transform(filter_variants, suffix('.markedHardFiltering.vcf'), '.analysisReady.vcf')
-def remove_filtered(input_vcf, output_vcf):
-    """Remove filtered variants"""
-    args = "-T SelectVariants \
-            -R {reference} \
-            --variant {input} \
-            -o {output} \
-            -env -ef".format(
-                reference=reference,
-                input=input_vcf,
-                output=output_vcf)
-
-    # remove(input)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
     
 
-@transform(remove_filtered, suffix('.analysisReady.vcf'),'.analysisReady.exome.vcf')
+@transform(apply_recalibration_filter_indels, suffix('.recalibrated.vcf'), '.analysisReady.exome.vcf')
 def final_calls(input_vcf, output):
     """ Produce the final variant calls in the exome regions """
     output = output[:-10]
@@ -1099,6 +1015,7 @@ def final_calls(input_vcf, output):
             -R {reference} \
             --variant {input} \
             -o {output} \
+            -env -ef \
             -L {exome}".format(
                 reference=reference,
                 input=input_vcf,
@@ -1111,10 +1028,8 @@ def final_calls(input_vcf, output):
 
 def split_snp_parameters():
     exome_vcf = 'multisample.gatk.analysisReady.exome.vcf'
-    mtdna_vcf = 'multisample.gatk.mt.vcf'
     for s_id in get_sample_ids():
         yield [exome_vcf, s_id + '/' + s_id + '.exome.vcf', s_id]
-        yield [mtdna_vcf, s_id + '/' + s_id + '.mt.vcf', s_id]
 
 
 def cleanup_files():
