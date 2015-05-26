@@ -1061,8 +1061,8 @@ def filter_variants(input_vcf, output_vcf):
     args = "-T VariantFiltration \
             -o {output} \
             --variant {input} \
-            --filterExpression \"QD < 3.0\" \
-            --filterExpression \"DP < 6\" \
+            --filterExpression 'QD < 3.0' \
+            --filterExpression 'DP < 6' \
             --filterName QDFilter   \
             --filterName DPFilter   \
             -R {reference}".format(
@@ -1103,7 +1103,7 @@ def final_calls(input_vcf, output):
                 reference=reference,
                 input=input_vcf,
                 output=output_vcf,
-                exome)
+                exome=exome)
 
     # remove(input)
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
@@ -1154,7 +1154,7 @@ def split_snps(vcf, output, sample):
             -R {ref} \
             --variant {vcf} \
             -sn {sample} \
-            -select 'vc.getGenotype(\"{sample}\").getAD().1 >= {ad_thr} && vc.getGenotype(\"{sample}\").getDP() >= {dp_thr}' \
+            -select 'vc.getGenotype(\\\"{sample}\\\").getAD().1 >= {ad_thr} && vc.getGenotype(\\\"{sample}\\\").getDP() >= {dp_thr}' \
             -o {out} \
             ".format(ref=reference,
                      vcf=vcf, 
