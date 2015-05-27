@@ -1091,9 +1091,8 @@ def remove_filtered(input_vcf, output_vcf):
     
 
 @transform(remove_filtered, suffix('.analysisReady.vcf'),'.analysisReady.exome.vcf')
-def final_calls(input_vcf, output):
+def final_calls(input_vcf, output_vcf):
     """ Produce the final variant calls in the exome regions """
-    output = output[:-10]
     
     args = "-T SelectVariants \
             -R {reference} \
