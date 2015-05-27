@@ -1061,8 +1061,8 @@ def filter_variants(input_vcf, output_vcf):
     args = "-T VariantFiltration \
             -o {output} \
             --variant {input} \
-            --filterExpression 'QD < 3.0' \
-            --filterExpression 'DP < 6' \
+            --filterExpression QD<3.0' \
+            --filterExpression DP<6' \
             --filterName QDFilter   \
             --filterName DPFilter   \
             -R {reference}".format(
@@ -1114,7 +1114,8 @@ def split_snp_parameters():
     mtdna_vcf = 'multisample.gatk.mt.vcf'
     for s_id in get_sample_ids():
         yield [exome_vcf, s_id + '/' + s_id + '.exome.vcf', s_id]
-        yield [mtdna_vcf, s_id + '/' + s_id + '.mt.vcf', s_id]
+        if os.path.exists(mtdna_vcf):
+            yield [mtdna_vcf, s_id + '/' + s_id + '.mt.vcf', s_id]
 
 
 def cleanup_files():
@@ -1154,7 +1155,7 @@ def split_snps(vcf, output, sample):
             -R {ref} \
             --variant {vcf} \
             -sn {sample} \
-            -select 'vc.getGenotype(\\\"{sample}\\\").getAD().1 >= {ad_thr} && vc.getGenotype(\\\"{sample}\\\").getDP() >= {dp_thr}' \
+            -select 'vc.getGenotype(\\\"{sample}\\\").getAD().1>={ad_thr}&&vc.getGenotype(\\\"{sample}\\\").getDP()>={dp_thr}' \
             -o {out} \
             ".format(ref=reference,
                      vcf=vcf, 
