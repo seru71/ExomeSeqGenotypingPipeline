@@ -1007,10 +1007,8 @@ def apply_recalibration_filter_indels(inputs,output):
     
 
 @transform(apply_recalibration_filter_indels, suffix('.recalibrated.vcf'), '.analysisReady.exome.vcf')
-def final_calls(input_vcf, output):
-    """ Produce the final variant calls in the exome regions """
-    output = output[:-10]
-    
+def final_calls(input_vcf, output_vcf):
+    """ Produce the final variant calls in the exome regions """    
     args = "-T SelectVariants \
             -R {reference} \
             --variant {input} \
