@@ -221,6 +221,7 @@ if __name__ == '__main__':
     capture = os.path.join(reference_root, config.get('Resources','capture-regions-bed'))
     capture_qualimap = os.path.join(reference_root, config.get('Resources','capture-regions-bed-for-qualimap'))
     exome = os.path.join(reference_root, config.get('Resources', 'exome-regions-bed'))
+    gene_coordinates = os.path.join(reference_root, config.get('Resources', 'gene-coordinates'))
     
     adapters = os.path.join(reference_root, config.get('Resources', 'adapters-fasta'))
     
@@ -319,7 +320,7 @@ def bam_alignment_metrics(bam,metrics):
                     ".format(ref=reference, out=metrics, bam=bam),
             interpreter_args="")
     
-def bam_coverage_metrics(input_bam, output):
+def bam_target_coverage_metrics(input_bam, output):
     """ Calculates and outputs bam coverage statistics """
     run_cmd(gatk, "-R {reference} \
                     -T DepthOfCoverage \
@@ -333,6 +334,24 @@ def bam_coverage_metrics(input_bam, output):
                              input=input_bam,
                              capture=capture), 
             interpreter_args="-Xmx4g")
+
+def bam_gene_coverage_metrics(input_bam, output):
+    """ Calculates and outputs bam coverage statistics """
+    run_cmd(gatk, "-R {reference} \
+                    -T DepthOfCoverage \
+                    -o {output} \
+                    -I {input} \
+                    -L {capture} \
+                    -geneList {genes} \
+                    -ct 5 -ct 10 -ct 20 \
+                    --omitDepthOutputAtEachBase --omitLocusTable \
+                    ".format(reference=reference,
+                             output=output,
+                             input=input_bam,
+                             capture=capture,
+                             genes=gene_coordinates), 
+            interpreter_args="-Xmx4g")
+
 
 def qualimap_bam(input_bam, output_dir):
     """ Generates Qualimap bam QC report """
@@ -655,17 +674,22 @@ def qc_raw_bam_alignment_metrics(input_bam, output):
     bam_alignment_metrics(input_bam, output)
     
 @follows(index)
-@transform(merge_lanes, suffix(".bam"), '.coverage.sample_summary', r'\1.coverage')
-def qc_raw_bam_coverage_metrics(input_bam, output, output_format):
-    bam_coverage_metrics(input_bam, output_format)
+@transform(merge_lanes, suffix(".bam"), '.target_coverage.sample_summary', r'\1.target_coverage')
+def qc_raw_bam_target_coverage_metrics(input_bam, output, output_format):
+    bam_target_coverage_metrics(input_bam, output_format)
+
+@follows(index)
+@transform(merge_lanes, suffix('.bam'), '.gene_coverage.sample_summary', r'\1.gene_coverage')
+def qc_raw_bam_gene_coverage_metrics(input_bam, output, output_format):
+    bam_gene_coverage_metrics(input_bam, output_format)
+
 
 @follows(index)
 @transform(merge_lanes, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{subpath[0][1]}/qc/qualimap/{SAMPLE_ID[0]}')
 def qc_raw_bam_qualimap_report(input_bam, output_dir):
     qualimap_bam(input_bam, output_dir)
 
-#@follows(qc_raw_bam_quality_score_distribution, qc_raw_bam_alignment_metrics, qc_raw_bam_coverage_metrics)
-@follows(qc_raw_bam_coverage_metrics, qc_raw_bam_qualimap_report)
+@follows(qc_raw_bam_target_coverage_metrics, qc_raw_bam_qualimap_report)
 def raw_bam_qc():
     """ Aggregates raw bam quality control steps """
     pass
@@ -808,30 +832,29 @@ def recalibrate_baseq2(inputs, output_bam):
 # gatk.bam-level QC measurements
 #
 
-#@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.quality_score')
 def qc_gatk_bam_quality_score_distribution(input_bam, output):
     """docstring for metrics1"""
     bam_quality_score_distribution(input_bam, output, output + '.pdf')
 
-#@follows(recalibrate_baseq2)
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.metrics')
 def qc_gatk_bam_alignment_metrics(input_bam, output):
     """docstring for metrics1"""
     bam_alignment_metrics(input_bam, output)
 
-#@follows(recalibrate_baseq2)
-@transform(recalibrate_baseq2, suffix('.gatk.bam'), '.coverage.sample_summary', r'\1.coverage')
-def qc_gatk_bam_coverage_metrics(input_bam, output, output_format):
-    bam_coverage_metrics(input_bam, output_format)
+@transform(recalibrate_baseq2, suffix('.gatk.bam'), '.target_coverage.sample_summary', r'\1.target_coverage')
+def qc_gatk_bam_target_coverage_metrics(input_bam, output, output_format):
+    bam_target_coverage_metrics(input_bam, output_format)
+
+@transform(recalibrate_baseq2, suffix('.gatk.bam'), '.gene_coverage.sample_summary', r'\1.gene_coverage')
+def qc_gatk_bam_gene_coverage_metrics(input_bam, output, output_format):
+    bam_gene_coverage_metrics(input_bam, output_format)
 
 @transform(recalibrate_baseq2, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{subpath[0][1]}/qc/qualimap/{SAMPLE_ID[0]}')
 def qc_gatk_bam_qualimap_report(input_bam, output_dir):
     qualimap_bam(input_bam, output_dir)
 
-
-#@follows(qc_gatk_bam_quality_score_distribution, qc_gatk_bam_alignment_metrics, qc_gatk_bam_coverage_metrics, qc_gatk_bam_qualimap_report)
-@follows(qc_gatk_bam_coverage_metrics, qc_gatk_bam_qualimap_report)
+@follows(qc_gatk_bam_target_coverage_metrics, qc_gatk_bam_qualimap_report)
 def gatk_bam_qc():
     """ Aggregates gatk_bam quality control steps """
     pass
