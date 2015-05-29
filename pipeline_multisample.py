@@ -352,12 +352,11 @@ def bam_gene_coverage_metrics(input_bam, output):
                              genes=gene_coordinates), 
             interpreter_args="-Xmx4g")
 
-
 def qualimap_bam(input_bam, output_dir):
     """ Generates Qualimap bam QC report """
     # create necessary folders first
-    if not os.path.exists('qc'): os.mkdir('qc')
-    if not os.path.exists('qc/qualimap/'): os.mkdir('qc/qualimap')
+    #if not os.path.exists('qc'): os.mkdir('qc')
+    #if not os.path.exists('qc/qualimap/'): os.mkdir('qc/qualimap')
     if not os.path.exists(output_dir): os.mkdir(output_dir)
     run_cmd(qualimap, "bamqc -bam {bam} \
                         -c -outformat PDF \
@@ -683,7 +682,7 @@ def qc_raw_bam_target_coverage_metrics(input_bam, output, output_format):
 def qc_raw_bam_gene_coverage_metrics(input_bam, output, output_format):
     bam_gene_coverage_metrics(input_bam, output_format)
 
-@follows(index)
+@follows(index, mkdir(os.path.join(cwd,'qc')), mkdir(os.path.join(cwd,'qc','qualimap')))
 @transform(merge_lanes, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{subpath[0][1]}/qc/qualimap/{SAMPLE_ID[0]}')
 def qc_raw_bam_qualimap_report(input_bam, output_dir):
     qualimap_bam(input_bam, output_dir)
@@ -833,27 +832,47 @@ def recalibrate_baseq2(inputs, output_bam):
 
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.quality_score')
 def qc_gatk_bam_quality_score_distribution(input_bam, output):
-    """docstring for metrics1"""
+    """ Generate quality score stats for gatk bam """
     bam_quality_score_distribution(input_bam, output, output + '.pdf')
 
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.metrics')
 def qc_gatk_bam_alignment_metrics(input_bam, output):
-    """docstring for metrics1"""
+    """ Generate alignment stats for gatk bam """
     bam_alignment_metrics(input_bam, output)
 
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.target_coverage.sample_summary', r'\1.target_coverage')
-def qc_gatk_bam_target_coverage_metrics(input_bam, output, output_format):
-    bam_target_coverage_metrics(input_bam, output_format)
+def qc_gatk_bam_target_coverage_metrics(input_bam, output, output_prefix):
+    """ Generate target-level coverage stats for gatk bam """
+    bam_target_coverage_metrics(input_bam, output_prefix)
 
-@transform(recalibrate_baseq2, suffix('.gatk.bam'), '.gene_coverage.sample_summary', r'\1.gene_coverage')
-def qc_gatk_bam_gene_coverage_metrics(input_bam, output, output_format):
-    bam_gene_coverage_metrics(input_bam, output_format)
+@merge(qc_gatk_bam_target_coverage_metrics, os.path.join(cwd,'qc','sample_coverage.multisample.tsv')) 
+def qc_gatk_merge_sample_summary_stats(inputs, output):
+    run_cmd("head -n1 {input} > {out}".format(input=inputs[0], out=output), "", run_locally=True)
+    for input in inputs:
+        run_cmd("head -n2 {input} | tail -n1 >> {out}".format(input=input, out=output), "", run_locally=True)
 
+@follows(mkdir(os.path.join(cwd,'qc')))
+@transform(recalibrate_baseq2, 
+           formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), 
+           '{subpath[0][1]}/qc/{SAMPLE_ID[0]}.gene_coverage.interval_summary',
+           '{subpath[0][1]}/qc/{SAMPLE_ID[0]}.gene_coverage')
+#           suffix('.gatk.bam'), '.gene_coverage.sample_summary', r'\1.gene_coverage')   
+def qc_gatk_bam_gene_coverage_metrics(input_bam, output, output_prefix):
+    """ Generate gene-level coverage stats for gatk bam """
+    bam_gene_coverage_metrics(input_bam, output_prefix)
+    
+@merge(qc_gatk_bam_gene_coverage_metrics, os.path.join(cwd,'qc','gene_coverage.multisample.tsv')) 
+def qc_gatk_merge_gene_interval_summary_stats(inputs, output):
+    run_cmd("paste {inputs} > {output}".format(inputs=" ".join(inputs), output=output), 
+            "", run_locally=True)
+    
+@follows(mkdir(os.path.join(cwd,'qc')), mkdir(os.path.join(cwd,'qc','qualimap')))
 @transform(recalibrate_baseq2, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{subpath[0][1]}/qc/qualimap/{SAMPLE_ID[0]}')
 def qc_gatk_bam_qualimap_report(input_bam, output_dir):
+    """ Produces qualimap report for gatk bam """
     qualimap_bam(input_bam, output_dir)
 
-@follows(qc_gatk_bam_gene_coverage_metrics)
+@follows(qc_gatk_merge_gene_interval_summary_stats)
 def gatk_bam_qc():
     """ Aggregates gatk_bam quality control steps """
     pass
@@ -1028,6 +1047,7 @@ def apply_recalibration_filter_indels(inputs,output):
     apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='INDEL',tranche_filter=99.0)
     
 
+@posttask(cleanup_files)
 @transform(apply_recalibration_filter_indels, suffix('.recalibrated.vcf'), '.analysisReady.exome.vcf')
 def final_calls(input_vcf, output_vcf):
     """ Produce the final variant calls in the exome regions """    
@@ -1052,33 +1072,6 @@ def split_snp_parameters():
         yield [exome_vcf, s_id + '/' + s_id + '.exome.vcf', s_id]
 
 
-def cleanup_files():
-    run_cmd("rm -rf */*.recal_data.csv */*.realign* */*.dedup* */*.log *.log \
-            *.to_filter* multisample.gatk.snp.recal batch* \
-            multisample.gatk.recalibratedSNPS.rawIndels.vcf \
-            multisample.gatk.indel.model.* multisample.gatk.snp.model.* \
-            multisample.gatk.analysisReady.vcf.vcfidx \
-            multisample.gatk.analysisReady.vcf.idx \
-            multisample.gatk.recalibratedSNPS.rawIndels.vcf.idx","",
-            run_locally=True)
-#            multisample.gatk.analysisReady.vcf \
-
-
-def archive_results():
-    # if optional results_archive was not provided - do nothing
-    if results_archive == None: return
-    
-    run_name = os.path.basename(os.getcwd())
-    arch_path = os.path.join(results_archive, run_name)
-    if not os.path.exists(arch_path): os.mkdir(arch_path)
-    run_cmd("cp */*.gatk.bam %s" % arch_path, "", run_locally=True)
-    run_cmd("cp */*.gatk.bam.gene_coverage* %s" % arch_path, "", run_locally=True)
-    run_cmd("cp */*.exome.vcf %s" % arch_path, "", run_locally=True)
-    run_cmd("cp multisample.gatk.gvcf %s" % os.path.join(results_archive,run_name+".multisample.gatk.gvcf"),
-            "", run_locally=True)
-
-
-@posttask(cleanup_files, archive_results)
 @follows('final_calls')
 @files(split_snp_parameters)
 def split_snps(vcf, output, sample):
@@ -1100,6 +1093,61 @@ def split_snps(vcf, output, sample):
                      dp_thr=DP_threshold)
             
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx2g" % tmp_dir, mem_per_cpu=2048)
+
+
+@follows(mkdir(os.path.join(cwd,'qc')))
+@merge(split_snps, os.path.join(cwd,'qc','variant_qc'))
+def variants_qc(vcf, output):
+    """ Generate variant QC table for all samples """    
+    args = "-T VariantEval \
+            -R {ref} \
+            -o {out} \
+            -noST -noEV -EV CountVariants \
+            ".format(ref=reference,
+                     vcf=vcf, 
+                     sample=sample, 
+                     out=output, 
+                     ad_thr=AD_threshold, 
+                     dp_thr=DP_threshold)
+    
+    for vcf in vcfs:
+        args += " --eval:{sample} {vcf}" % (os.path.basename(vcf), vcf)
+        
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx2g" % tmp_dir, mem_per_cpu=2048)
+    
+
+
+@posttask(archive_results, cleanup_files)
+@follows(gatk_bam_qc, variants_qc)
+def complete_run():
+    pass
+
+    
+def archive_results():
+    # if optional results_archive was not provided - do nothing
+    if results_archive == None: return
+    
+    run_name = os.path.basename(os.getcwd())
+    arch_path = os.path.join(results_archive, run_name)
+    if not os.path.exists(arch_path): os.mkdir(arch_path)
+    run_cmd("cp */*.gatk.bam %s" % arch_path, "", run_locally=True)
+    run_cmd("cp */*.gatk.bam.gene_coverage* %s" % arch_path, "", run_locally=True)
+    run_cmd("cp */*.exome.vcf %s" % arch_path, "", run_locally=True)
+    run_cmd("cp multisample.gatk.gvcf %s" % os.path.join(results_archive,run_name+".multisample.gatk.gvcf"),
+            "", run_locally=True)
+    run_cmd("cp -r qc %s" % arch_path, "", run_locally=True)
+
+
+def cleanup_files():
+    run_cmd("rm -rf */*.recal_data.csv */*.realign* */*.dedup* */*.log *.log \
+            *.to_filter* multisample.gatk.snp.recal batch* \
+            multisample.gatk.recalibratedSNPS.rawIndels.vcf \
+            multisample.gatk.indel.model.* multisample.gatk.snp.model.* \
+            multisample.gatk.analysisReady.vcf.vcfidx \
+            multisample.gatk.analysisReady.vcf.idx \
+            multisample.gatk.recalibratedSNPS.rawIndels.vcf.idx","",
+            run_locally=True)
+#            multisample.gatk.analysisReady.vcf \
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
