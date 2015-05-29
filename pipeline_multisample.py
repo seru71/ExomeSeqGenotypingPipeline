@@ -683,7 +683,6 @@ def qc_raw_bam_target_coverage_metrics(input_bam, output, output_format):
 def qc_raw_bam_gene_coverage_metrics(input_bam, output, output_format):
     bam_gene_coverage_metrics(input_bam, output_format)
 
-
 @follows(index)
 @transform(merge_lanes, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{subpath[0][1]}/qc/qualimap/{SAMPLE_ID[0]}')
 def qc_raw_bam_qualimap_report(input_bam, output_dir):
@@ -854,7 +853,7 @@ def qc_gatk_bam_gene_coverage_metrics(input_bam, output, output_format):
 def qc_gatk_bam_qualimap_report(input_bam, output_dir):
     qualimap_bam(input_bam, output_dir)
 
-@follows(qc_gatk_bam_target_coverage_metrics, qc_gatk_bam_qualimap_report)
+@follows(qc_gatk_bam_gene_coverage_metrics)
 def gatk_bam_qc():
     """ Aggregates gatk_bam quality control steps """
     pass
@@ -1073,6 +1072,7 @@ def archive_results():
     arch_path = os.path.join(results_archive, run_name)
     if not os.path.exists(arch_path): os.mkdir(arch_path)
     run_cmd("cp */*.gatk.bam %s" % arch_path, "", run_locally=True)
+    run_cmd("cp */*.gatk.bam.gene_coverage* %s" % arch_path, "", run_locally=True)
     run_cmd("cp */*.exome.vcf %s" % arch_path, "", run_locally=True)
     run_cmd("cp multisample.gatk.gvcf %s" % os.path.join(results_archive,run_name+".multisample.gatk.gvcf"),
             "", run_locally=True)
