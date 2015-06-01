@@ -477,7 +477,7 @@ def are_fastqs_converted(_,__):
 @files(input_dir, os.path.join(cwd,'fastqs','completed'))
 #@check_if_uptodate(are_fastqs_converted)
 @posttask(touch_file(os.path.join(cwd,'fastqs','completed')))
-def bcl2fastq_conversion(run_directory):
+def bcl2fastq_conversion(run_directory, completed_flag):
     """ Run bcl2fastq conversion and create fastq files in the run directory"""
     out_dir = os.path.join(cwd,'fastqs')
     interop_dir = os.path.join(out_dir,'InterOp')
