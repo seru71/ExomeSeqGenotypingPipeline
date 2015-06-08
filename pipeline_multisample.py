@@ -184,9 +184,15 @@ if __name__ == '__main__':
     docker_args = config.get('Docker', 'docker-args')
     docker_args += " -v " + ":".join([data_root,data_root,"ro"])
     docker_args += " -v " + ":".join([reference_root,reference_root,"ro"])
+
+    # Mount archive dirs as files from them are read (linked fastqs, gvcfs). 
+    # Archiving is not performed by docker, so no write access should be needed.
+    if fastq_archive != None:
+        docker_args += " -v " + ":".join([fastq_archive,fastq_archive,"ro"])
     if results_archive != None:
-        docker_args += " -v " + ":".join([results_archive,results_archive,"rw"])
-        
+        docker_args += " -v " + ":".join([results_archive,results_archive,"ro"])
+      
+    # Tmp, if should be different than the default  
     if tmp_dir != None: 
         docker_args += " -v " + ":".join([tmp_dir,tmp_dir,"rw"])
     else: # set the default value if the tmp-dir was unset
@@ -512,40 +518,40 @@ def bcl2fastq_conversion(run_directory, completed_flag):
     # touch a flag indicating that it has finished conversion
     #open(os.path.join(out_dir,'completed'),'w').close()
 
-@active_if(fastq_archive != None)
-#@transform(bcl2fastq_conversion, formatter(".+/?P<RUN_ID>/fastqs/completed"), os.path.join(fastq_archive,'{RUN_ID[0]}'))
-@transform(bcl2fastq_conversion, formatter(".+/(?P<RUN_ID>[^/]+)/fastqs/completed"), str(fastq_archive) + '/{RUN_ID[0]}')
-def archive_fastqs(input, archive_dir):
-    """ Archive fastqs """
-    # if optional fastq-archive-root was not provided - do nothing
-    #if fastq_archive == None: return
-    
-    fq_dir = os.path.dirname(input)
 
-#    run_name = os.path.basename(cwd)
-#    arch_path = os.path.join(fastq_archive, run_name)
-#    if not os.path.exists(arch_path):
-#        os.mkdir(arch_path)
+@active_if(fastq_archive != None)
+@transform(bcl2fastq_conversion, formatter(".+/(?P<RUN_ID>[^/]+)/fastqs/completed"), str(fastq_archive)+"/{RUN_ID[0]}")
+# if we should overwrite...
+#@follows(bcl2fastq_conversion)
+#@transform(os.path.join(cwd,'fastqs','*.fastq.gz'), formatter(".+/(?P<RUN_ID>[^/]+)/fastqs/(?P<FNAME>.+).fastq.gz"), 
+#						fastq_archive+"/{RUN_ID[0]}/{FNAME[0]}.fastq.gz")
+def archive_fastqs(completed_flag, archive_dir):
+    """ Archive fastqs """    
+    fq_dir = os.path.dirname(completed_flag)
+
+    if os.path.exists(archive_dir):
+	import time
+	archive_dir += "_archived_"+str(time.strftime("%Y%m%d_%H%M%S"))
 
     import shutil
     shutil.move(fq_dir, archive_dir)
     os.mkdir(fq_dir)
-    for f in glob.glob(os.path.join(archive_dir,'*.fastq.gz')):
+    for f in glob.glob(os.path.join(archive_dir,"*.fastq.gz")):
         os.symlink(f, os.path.join(fq_dir,os.path.basename(f)))
 
 
 #
-# Prepare directory structure move in the input fastq files
+# Prepare directory for every sample and link the input fastq files
 # Expected format:
-#    /path/to/file/[SAMPLE_ID]_[anything_except_path_delimiter].fastq.gz
+#    /path/to/file/[SAMPLE_ID]_S[1-9]\d?_L\d\d\d_R[12]_001.fastq.gz
 #
 @jobs_limit(1)    # to avoid problems with simultanous creation of the same sample dir
 @follows(archive_fastqs)
 @subdivide(os.path.join(cwd,'fastqs','*.fastq.gz'),
-           formatter('.+/(?P<SAMPLE_ID>[^_/]+)_S[1-9][0-9]?_L\d\d\d_R[12]_001\.fastq\.gz$'), 
+           formatter('.+/(?P<SAMPLE_ID>[^_/]+)_S[1-9]\d?_L\d\d\d_R[12]_001\.fastq\.gz$'), 
            '{SAMPLE_ID[0]}/{basename[0]}{ext[0]}')
 def link_fastqs(fastq_in, fastq_out):
-    """Make working directory for every sample and move fastq files in"""
+    """Make working directory for every sample and link fastq files in"""
     if not os.path.exists(os.path.dirname(fastq_out)):
         os.mkdir(os.path.dirname(fastq_out))
     if not os.path.exists(fastq_out):
@@ -618,6 +624,8 @@ def align_reads(fastqs, sam):
 def merge_lanes(lane_sams, bam):
     args = "MergeSamFiles O={bam} \
             ASSUME_SORTED=false \
+            MAX_RECORDS_IN_RAM=2000000 \
+            USE_THREADING=true \
             ".format(bam=bam)
     # include all sam files as args
     for sam in lane_sams:
@@ -1047,7 +1055,6 @@ def apply_recalibration_filter_indels(inputs,output):
     apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='INDEL',tranche_filter=99.0)
     
 
-@posttask(cleanup_files)
 @transform(apply_recalibration_filter_indels, suffix('.recalibrated.vcf'), '.analysisReady.exome.vcf')
 def final_calls(input_vcf, output_vcf):
     """ Produce the final variant calls in the exome regions """    
@@ -1116,17 +1123,10 @@ def variants_qc(vcf, output):
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx2g" % tmp_dir, mem_per_cpu=2048)
     
 
-
-@posttask(archive_results, cleanup_files)
-@follows(gatk_bam_qc, variants_qc)
-def complete_run():
-    pass
-
-    
 def archive_results():
     # if optional results_archive was not provided - do nothing
     if results_archive == None: return
-    
+
     run_name = os.path.basename(os.getcwd())
     arch_path = os.path.join(results_archive, run_name)
     if not os.path.exists(arch_path): os.mkdir(arch_path)
@@ -1148,6 +1148,15 @@ def cleanup_files():
             multisample.gatk.recalibratedSNPS.rawIndels.vcf.idx","",
             run_locally=True)
 #            multisample.gatk.analysisReady.vcf \
+
+
+@posttask(archive_results, cleanup_files)
+@follows(gatk_bam_qc, variants_qc)
+def complete_run():
+    pass
+
+
+
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
