@@ -208,9 +208,15 @@ if __name__ == '__main__':
     docker_args = config.get('Docker', 'docker-args')
     docker_args += " -v " + ":".join([options.run_folder, options.run_folder,"ro"])
     docker_args += " -v " + ":".join([reference_root,reference_root,"ro"])
+
+    # Mount archive dirs as files from them are read (linked fastqs, gvcfs). 
+    # Archiving is not performed by docker, so no write access should be needed.
+    if fastq_archive != None:
+        docker_args += " -v " + ":".join([fastq_archive,fastq_archive,"ro"])
     if results_archive != None:
         docker_args += " -v " + ":".join([results_archive,results_archive,"ro"])
-        
+
+    # Tmp, if should be different than the default  
     if tmp_dir != None: 
         docker_args += " -v " + ":".join([tmp_dir,tmp_dir,"rw"])
     else: # set the default value if the tmp-dir was unset
@@ -518,7 +524,7 @@ def are_fastqs_converted(_,__):
 @files(options.run_folder, os.path.join(runs_scratch_dir,'fastqs','completed'))
 #@check_if_uptodate(are_fastqs_converted)
 @posttask(touch_file(os.path.join(runs_scratch_dir,'fastqs','completed')))
-def bcl2fastq_conversion(run_directory):
+def bcl2fastq_conversion(run_directory, completed_flag):
     """ Run bcl2fastq conversion and create fastq files in the run directory"""
     out_dir = os.path.join(runs_scratch_dir,'fastqs')
     interop_dir = os.path.join(out_dir,'InterOp')
@@ -535,40 +541,40 @@ def bcl2fastq_conversion(run_directory):
     # touch a flag indicating that it has finished conversion
     #open(os.path.join(out_dir,'completed'),'w').close()
 
-@active_if(fastq_archive != None)
-#@transform(bcl2fastq_conversion, formatter(".+/?P<RUN_ID>/fastqs/completed"), os.path.join(fastq_archive,'{RUN_ID[0]}'))
-@transform(bcl2fastq_conversion, formatter(".+/(?P<RUN_ID>[^/]+)/fastqs/completed"), str(fastq_archive) + '/{RUN_ID[0]}')
-def archive_fastqs(input, archive_dir):
-    """ Archive fastqs """
-    # if optional fastq-archive-root was not provided - do nothing
-    #if fastq_archive == None: return
-    
-    fq_dir = os.path.dirname(input)
 
-#    run_name = os.path.basename(runs_scratch_dir)
-#    arch_path = os.path.join(fastq_archive, run_name)
-#    if not os.path.exists(arch_path):
-#        os.mkdir(arch_path)
+@active_if(fastq_archive != None)
+@transform(bcl2fastq_conversion, formatter(".+/(?P<RUN_ID>[^/]+)/fastqs/completed"), str(fastq_archive)+"/{RUN_ID[0]}")
+# if we should overwrite...
+#@follows(bcl2fastq_conversion)
+#@transform(os.path.join(cwd,'fastqs','*.fastq.gz'), formatter(".+/(?P<RUN_ID>[^/]+)/fastqs/(?P<FNAME>.+).fastq.gz"), 
+#						fastq_archive+"/{RUN_ID[0]}/{FNAME[0]}.fastq.gz")
+def archive_fastqs(completed_flag, archive_dir):
+    """ Archive fastqs """    
+    fq_dir = os.path.dirname(completed_flag)
+
+    if os.path.exists(archive_dir):
+	import time
+	archive_dir += "_archived_"+str(time.strftime("%Y%m%d_%H%M%S"))
 
     import shutil
     shutil.move(fq_dir, archive_dir)
     os.mkdir(fq_dir)
-    for f in glob.glob(os.path.join(archive_dir,'*.fastq.gz')):
+    for f in glob.glob(os.path.join(archive_dir,"*.fastq.gz")):
         os.symlink(f, os.path.join(fq_dir,os.path.basename(f)))
 
 
 #
-# Prepare directory structure move in the input fastq files
+# Prepare directory for every sample and link the input fastq files
 # Expected format:
-#    /path/to/file/[SAMPLE_ID]_[anything_except_path_delimiter].fastq.gz
+#    /path/to/file/[SAMPLE_ID]_S[1-9]\d?_L\d\d\d_R[12]_001.fastq.gz
 #
 @jobs_limit(1)    # to avoid problems with simultanous creation of the same sample dir
 @follows(archive_fastqs)
 @subdivide(os.path.join(runs_scratch_dir,'fastqs','*.fastq.gz'),
-           formatter('.+/(?P<SAMPLE_ID>[^_/]+)_S[1-9][0-9]?_L\d\d\d_R[12]_001\.fastq\.gz$'), 
+           formatter('.+/(?P<SAMPLE_ID>[^/]+)_S[1-9]\d?_L\d\d\d_R[12]_001\.fastq\.gz$'), 
            '{SAMPLE_ID[0]}/{basename[0]}{ext[0]}')
 def link_fastqs(fastq_in, fastq_out):
-    """Make working directory for every sample and move fastq files in"""
+    """Make working directory for every sample and link fastq files in"""
     if not os.path.exists(os.path.dirname(fastq_out)):
         os.mkdir(os.path.dirname(fastq_out))
     if not os.path.exists(fastq_out):
@@ -610,12 +616,12 @@ def trim_reads(inputs, output):
 # FASTQ filenames are expected to have following format:
 #    [SAMPLE_ID]_[LANE_ID].fq[1|2].gz
 # In this step, the fq1 file coming from trim_reads is matched with the fq2 file and mapped together. 
-# The output will be written to SAM file:
-#    [SAMPLE_ID]_[LANE_ID].sam
+# The output will be written to BAM file:
+#    [SAMPLE_ID]_[LANE_ID].bam
 #
 #@collate(trim_reads, regex(r"([^_]+_[^_]+)\.fq[12]\.gz$"), r'\1.sam')
-@transform(trim_reads, suffix('.fq1.gz'), add_inputs(r'\1.fq2.gz'), '.sam')
-def align_reads(fastqs, sam):
+@transform(trim_reads, suffix('.fq1.gz'), add_inputs(r'\1.fq2.gz'), '.bam')
+def align_reads(fastqs, bam):
     threads = 2
     
     # construct read group information from fastq file name (assuming [SAMPLE_ID]_[LANE_ID].fq[1|2].gz format)
@@ -625,26 +631,30 @@ def align_reads(fastqs, sam):
     read_group = "@RG\\tID:{id}\\tSM:{sm}\\tLB:{lb}\\tPL:{pl}\\tPU:{pu} \
                  ".format(id=sample_lane, sm=sample, lb=sample, pl="ILLUMINA", pu=lane)
                  
-    args = "mem -t {threads} -R '{rg}' {ref} {fq1} {fq2} > {sam} \
-            ".format(threads=threads, rg=read_group, ref=reference, 
-                     fq1=fastqs[0], fq2=fastqs[1], sam=sam)
-    run_cmd(bwa, args, cpus=threads, mem_per_cpu=8192/threads)
+    args = "mem -t {threads} -R {rg} {ref} {fq1} {fq2} \
+	    ".format(threads=threads, rg=read_group, ref=reference, 
+                     fq1=fastqs[0], fq2=fastqs[1])
+    iargs = "samtools view -b -o {bam} -".format(bam=bam)
+
+    run_cmd(bwa, args, interpreter_args=iargs, cpus=threads, mem_per_cpu=8192/threads)
     
 
 #
-# SAM filenames are expected to have following format:
-#    [SAMPLE_ID]_[LANE_ID].sam
-# In this step, all SAM files matching on the SAMPLE_ID will be merged into one BAM file:
+# BAM filenames are expected to have following format:
+#    [SAMPLE_ID]_[LANE_ID].bam
+# In this step, all BAM files matching on the SAMPLE_ID will be merged into one BAM file:
 #    [SAMPLE_ID].bam
 #
-@collate(align_reads, regex(r"([^_]+).+\.sam$"),  r'\1.bam')
-def merge_lanes(lane_sams, bam):
+@collate(align_reads, regex(r"([^_]+).+\.bam$"),  r'\1.bam')
+def merge_lanes(lane_bams, out_bam):
     args = "MergeSamFiles O={bam} \
             ASSUME_SORTED=false \
-            ".format(bam=bam)
-    # include all sam files as args
-    for sam in lane_sams:
-        args += " I={sam}".format(sam=sam)
+            MAX_RECORDS_IN_RAM=2000000 \
+            USE_THREADING=true \
+            ".format(bam=out_bam)
+    # include all bam files as args
+    for bam in lane_bams:
+        args += " I={bam}".format(bam=bam)
         
     run_cmd(picard, args, interpreter_args="-Xmx8g", cpus=4, mem_per_cpu=2048)
     
@@ -662,15 +672,15 @@ def generate_bam_inputs():
             yield job_parameters
 
 
-def clean_fastqs_and_sam():
+def clean_fastqs_and_lane_bams():
     """ Remove the trimmed fastq files, and SAM files. Links to original fastqs are kept """
     for f in glob.glob(os.path.join(runs_scratch_dir,'*','*.fq[12]*.gz')):
         os.remove(f)
-    for f in glob.glob(os.path.join(runs_scratch_dir,'*','*.sam')):
+    for f in glob.glob(os.path.join(runs_scratch_dir,'*','*_L\d\d\d.bam')):
         os.remove(f)
 
 
-@posttask(clean_fastqs_and_sam)
+@posttask(clean_fastqs_and_lane_bams)
 @transform(merge_lanes, suffix(".bam"), '.bam.bai')
 def index(bam, output):
     """Create raw bam index"""
@@ -1082,7 +1092,6 @@ def apply_recalibration_filter_indels(inputs,output):
     apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='INDEL',tranche_filter=99.0)
     
 
-@posttask(cleanup_files)
 @transform(apply_recalibration_filter_indels, suffix('.recalibrated.vcf'), '.analysisReady.exome.vcf')
 def final_calls(input_vcf, output_vcf):
     """ Produce the final variant calls in the exome regions """    
@@ -1151,19 +1160,13 @@ def variants_qc(vcf, output):
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx2g" % tmp_dir, mem_per_cpu=2048)
     
 
-
-@posttask(archive_results, cleanup_files)
-@follows(gatk_bam_qc, variants_qc)
-def complete_run():
-    pass
-
-    
 def archive_results():
     # if optional results_archive was not provided - do nothing
     if results_archive == None: return
-    
     arch_path = os.path.join(results_archive, run_id)
-    if not os.path.exists(arch_path): os.mkdir(arch_path)
+    if not os.path.exists(arch_path): 
+        os.mkdir(arch_path)
+        
     run_cmd("cp %s/*/*.gatk.bam %s" % (runs_scratch_dir,arch_path), "", run_locally=True)
     run_cmd("cp %s/*/*.gatk.bam.gene_coverage* %s" % (runs_scratch_dir,arch_path), "", run_locally=True)
     run_cmd("cp %s/*/*.exome.vcf %s" % (runs_scratch_dir,arch_path), "", run_locally=True)
@@ -1178,6 +1181,15 @@ def cleanup_files():
             {dir}/*/*.log {dir}/*.multisample.recalibratedSNPS.rawIndels.vcf* \
             {dir}/*.multisample.recalibrated.vcf* \
             ".format(dir=runs_scratch_dir), "", run_locally=True)
+
+
+@posttask(archive_results, cleanup_files)
+@follows(gatk_bam_qc, variants_qc)
+def complete_run():
+    pass
+
+
+
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
