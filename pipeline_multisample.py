@@ -2,11 +2,12 @@
 """
 
     pipeline_multisample.py
-                        [--settings PATH]
+                        --run_folder PATH
+                        [--settings PATH] (by default RUN_FOLDER/settings.cfg)
                         [--log_file PATH]
                         [--verbose]
-                        [--target_tasks]
-                        [--jobs N]
+                        [--target_tasks]  (by default the last task in the pipeline)
+                        [--jobs N]        (by default 1)
                         [--just_print]
                         [--flowchart]
                         [--key_legend_in_graph]
@@ -31,17 +32,19 @@ if __name__ == '__main__':
     from optparse import OptionParser
     import StringIO
 
-    parser = OptionParser(version="%prog 1.0", usage = "\n\n    %prog --settings PIPELINE_SETTINGS.CFG --target_task TASK [more_options]")
-    parser.add_option("-s", "--settings", dest="pipeline_settings",
+    parser = OptionParser(version="%prog 1.0", usage = "\n\n    %prog --run_folder PATH_TO_RUN_FOLDER [--settings pipeline_settings.cfg] [--target_task TASK] [more_options]")
+    
+    parser.add_option("-r", "--run_folder", dest="run_folder",
                         metavar="FILE",
                         type="string",
-                        help="File containing all the settings for the analysis.")                  
-                            
+                        help="Path to the input run folder.")                  
+    
+                                
     #
     #   general options: verbosity / logging
     #
     parser.add_option("-v", "--verbose", dest = "verbose",
-                      action="count", default=0,
+                      action="count", 
                       help="Print more verbose messages for each additional verbose level.")
     parser.add_option("-L", "--log_file", dest="log_file",
                       metavar="FILE",
@@ -49,24 +52,24 @@ if __name__ == '__main__':
                       help="Name and path of log file")
 
 
-
-
     #
     #   pipeline
     #
+    parser.add_option("-s", "--settings", dest="pipeline_settings",
+                        metavar="FILE",
+                        type="string",
+                        help="File containing all the settings for the analysis. By default settings.cfg in the run_folder.")                  
     parser.add_option("-t", "--target_tasks", dest="target_tasks",
                         action="append",
-                        default = list(),
                         metavar="JOBNAME",
                         type="string",
                         help="Target task(s) of pipeline.")
     parser.add_option("-j", "--jobs", dest="jobs",
-                        default=1,
                         metavar="N",
                         type="int",
                         help="Allow N jobs (commands) to run simultaneously.")
     parser.add_option("-n", "--just_print", dest="just_print",
-                        action="store_true", default=False,
+                        action="store_true", 
                         help="Don't actually run any commands; just print the pipeline.")
     parser.add_option("--flowchart", dest="flowchart",
                         metavar="FILE",
@@ -78,21 +81,25 @@ if __name__ == '__main__':
     #   Less common pipeline options
     #
     parser.add_option("--key_legend_in_graph", dest="key_legend_in_graph",
-                        action="store_true", default=False,
+                        action="store_true",
                         help="Print out legend and key for dependency graph.")
     parser.add_option("--forced_tasks", dest="forced_tasks",
                         action="append",
-                        default = list(),
                         metavar="JOBNAME",
                         type="string",
                         help="Pipeline task(s) which will be included even if they are up to date.")
     parser.add_option("--rebuild_mode", dest="rebuild_mode",
-                        action="store_false", default=True,
+                        action="store_false", 
                         help="gnu_make_maximal_rebuild_mode")
     parser.add_option("--run_on_bcl_tile", dest="run_on_bcl_tile",
-                        type="string", 
-                        default=None,
+                        type="string",                        
                         help="Use only this tile when doing bcl2fastq conversion. For testing purposes.")
+    
+    parser.set_defaults(pipeline_settings=None, 
+                        jobs=1, verbose=0, 
+                        target_tasks=list(), forced_tasks=list(), 
+                        just_print=False, key_legend_in_graph=False,
+                        rebuild_mode=True, run_on_bcl_tile=None)
     
 
     # get help string
@@ -113,7 +120,7 @@ if __name__ == '__main__':
     #       strings corresponding to the "dest" parameter
     #       in the options defined above
     #
-    mandatory_options = ['pipeline_settings']
+    mandatory_options = ['run_folder']
 
     #vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
     #                                             #
@@ -139,7 +146,16 @@ if __name__ == '__main__':
                          ", ".join(missing_options),
                          helpstr))
         
-    check_mandatory_options (options, mandatory_options, helpstr)
+    check_mandatory_options(options, mandatory_options, helpstr)
+    
+    
+    #
+    # check presence of the run folder, and sample sheet file
+    #
+    if not os.path.exists(options.run_folder) or not os.path.exists(os.path.join(options.run_folder,'SampleSheet.csv')):
+        raise Exception("Missing sample sheet file: %s.\n" % os.path.join(options.run_folder,'SampleSheet.csv'))
+            
+    
 
 
     #vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
@@ -151,11 +167,19 @@ if __name__ == '__main__':
     import ConfigParser
 
     config = ConfigParser.ConfigParser()
-    config.read(options.pipeline_settings)
+    try:
+        if options.pipeline_settings == None:
+            options.pipeline_settings = os.path.join(options.run_folder, 'settings.cfg')
+        config.read(options.pipeline_settings)
+    except FileNotFound:
+        raise Exception('Provided settings file [%s] does not exist or cannot be read.' % options.pipeline_settings)
+
 
     # Root dirs
-    data_root = config.get('Docker','data-root')
     reference_root = config.get('Docker','reference-root')
+    
+    run_id = os.path.dirname(options.run_folder)    # get ID of the run and use it to create scratch results folder
+    runs_scratch_dir = os.path.join(config.get('Docker','scratch-root'), run_id)
       
     # optional results and fastq archive dirs  
     results_archive = None
@@ -171,7 +195,7 @@ if __name__ == '__main__':
         print 'No fastq-archive provided. Fastq files will not be archived outside of the current (working) directory.'
 
     
-    
+    # optional /tmp dir
     tmp_dir = None
     try:
         tmp_dir = config.get('Docker','tmp-dir')
@@ -182,32 +206,30 @@ if __name__ == '__main__':
     # Docker executable and args
     docker_bin = config.get('Docker','docker-binary')
     docker_args = config.get('Docker', 'docker-args')
-    docker_args += " -v " + ":".join([data_root,data_root,"ro"])
+    docker_args += " -v " + ":".join([options.run_folder, options.run_folder,"ro"])
     docker_args += " -v " + ":".join([reference_root,reference_root,"ro"])
     if results_archive != None:
-        docker_args += " -v " + ":".join([results_archive,results_archive,"rw"])
+        docker_args += " -v " + ":".join([results_archive,results_archive,"ro"])
         
     if tmp_dir != None: 
         docker_args += " -v " + ":".join([tmp_dir,tmp_dir,"rw"])
     else: # set the default value if the tmp-dir was unset
         tmp_dir = "/tmp"
         
-    cwd = os.getcwd()
-    docker_args += " -v " + ":".join([cwd,cwd,"rw"])
-    docker_args += " -w " + cwd
+    docker_args += " -v " + ":".join([runs_scratch_dir,runs_scratch_dir,"rw"])
+    docker_args += " -w " + runs_scratch_dir
     docker = " ".join([docker_bin, docker_args]) 
     
     # Inputs 
-    input_bams = os.path.join(data_root, config.get('Inputs','input-bams'))
-    input_dir  = os.path.join(data_root, config.get('Inputs','input-dir'))
+    input_bams = os.path.join(runs_scratch_dir, config.get('Inputs','input-bams'))
     
     # variant calls from other projects to call together with (semicolon separated list)
     try: 
-        call_with_gvcfs = [ os.path.join(reference_root, path.strip()) for path in config.get('Inputs','call-with-gvcfs').split(";") ]
+        call_with_gvcfs = [ os.path.join(results_archive, path.strip()) for path in config.get('Inputs','call-with-gvcfs').split(";") ]
         #print 'Calling will be done together with:'
         #for p in call_with_gvcfs:
         #	print '\t',p
-    except (ConfigParser.NoOptionError): 
+    except ConfigParser.NoOptionError: 
         call_with_gvcfs = [] 
     
     # reference files
@@ -464,7 +486,7 @@ def get_sample_ids():
     #files = glob.glob(input_bams)
     #return [ os.path.splitext(os.path.basename(f))[0] for f in files ]
     
-    files = glob.glob(os.path.join(cwd,'*','*.gvcf'))
+    files = glob.glob(os.path.join(runs_scratch_dir,'*','*.gvcf'))
     return [ os.path.splitext(os.path.basename(f))[0] for f in files ]
     # expect files in form /path/to/data/dir/[SAMPLE_ID]_[LANE_ID]_R[1|2]_001.bcl
     # and return a list of unique sorted SAMPLE_IDs
@@ -477,14 +499,14 @@ def get_num_files():
     return len(get_sample_ids())
 
 def are_fastqs_converted(_,__):
-#    fastqs = glob.glob(os.path.join(cwd,'fastqs','*.fastq.gz'))
+#    fastqs = glob.glob(os.path.join(runs_scratch_dir,'fastqs','*.fastq.gz'))
 #    print(fastqs)
 
 #    for fastq in fastqs:
 #        if not fastq.startswith('Undetermined'): 
 #            return False, 'FASTQ file %s found. Skipping bcl2fastq conversion' % os.path.basename(fastq)
 #   return True, 'No FASTQ files found'
-    if os.path.exists(os.path.join(cwd,'fastqs','completed')):
+    if os.path.exists(os.path.join(runs_scratch_dir,'fastqs','completed')):
         return False, 'Found bcl2fastq completion flag'
     return True, 'Missing bcl2fastq completion flag'
 
@@ -492,15 +514,16 @@ def are_fastqs_converted(_,__):
 #
 # Preprocess the reads, only if fastqs don't exist
 #
-@files(input_dir, os.path.join(cwd,'fastqs','completed'))
+@follows(mkdir(runs_scratch_dir), mkdir(os.path.join(runs_scratch_dir,'fastqs')))
+@files(options.run_folder, os.path.join(runs_scratch_dir,'fastqs','completed'))
 #@check_if_uptodate(are_fastqs_converted)
-@posttask(touch_file(os.path.join(cwd,'fastqs','completed')))
+@posttask(touch_file(os.path.join(runs_scratch_dir,'fastqs','completed')))
 def bcl2fastq_conversion(run_directory):
     """ Run bcl2fastq conversion and create fastq files in the run directory"""
-    out_dir = os.path.join(cwd,'fastqs')
+    out_dir = os.path.join(runs_scratch_dir,'fastqs')
     interop_dir = os.path.join(out_dir,'InterOp')
-    if not os.path.exists(out_dir):
-        os.mkdir(out_dir) 
+#    if not os.path.exists(out_dir):
+#        os.mkdir(out_dir) 
 
     # r, w, d, and p specify numbers of threads to be used for each of the concurrent subtasks of the conversion (see bcl2fastq manual) 
     args = "-R {indir} -o {outdir} --interop-dir={interopdir} -r1 -w1 -d2 -p4 \
@@ -522,7 +545,7 @@ def archive_fastqs(input, archive_dir):
     
     fq_dir = os.path.dirname(input)
 
-#    run_name = os.path.basename(cwd)
+#    run_name = os.path.basename(runs_scratch_dir)
 #    arch_path = os.path.join(fastq_archive, run_name)
 #    if not os.path.exists(arch_path):
 #        os.mkdir(arch_path)
@@ -541,7 +564,7 @@ def archive_fastqs(input, archive_dir):
 #
 @jobs_limit(1)    # to avoid problems with simultanous creation of the same sample dir
 @follows(archive_fastqs)
-@subdivide(os.path.join(cwd,'fastqs','*.fastq.gz'),
+@subdivide(os.path.join(runs_scratch_dir,'fastqs','*.fastq.gz'),
            formatter('.+/(?P<SAMPLE_ID>[^_/]+)_S[1-9][0-9]?_L\d\d\d_R[12]_001\.fastq\.gz$'), 
            '{SAMPLE_ID[0]}/{basename[0]}{ext[0]}')
 def link_fastqs(fastq_in, fastq_out):
@@ -641,9 +664,9 @@ def generate_bam_inputs():
 
 def clean_fastqs_and_sam():
     """ Remove the trimmed fastq files, and SAM files. Links to original fastqs are kept """
-    for f in glob.glob(os.path.join(cwd,'*','*.fq[12]*.gz')):
+    for f in glob.glob(os.path.join(runs_scratch_dir,'*','*.fq[12]*.gz')):
         os.remove(f)
-    for f in glob.glob(os.path.join(cwd,'*','*.sam')):
+    for f in glob.glob(os.path.join(runs_scratch_dir,'*','*.sam')):
         os.remove(f)
 
 
@@ -682,7 +705,7 @@ def qc_raw_bam_target_coverage_metrics(input_bam, output, output_format):
 def qc_raw_bam_gene_coverage_metrics(input_bam, output, output_format):
     bam_gene_coverage_metrics(input_bam, output_format)
 
-@follows(index, mkdir(os.path.join(cwd,'qc')), mkdir(os.path.join(cwd,'qc','qualimap')))
+@follows(index, mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','qualimap')))
 @transform(merge_lanes, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{subpath[0][1]}/qc/qualimap/{SAMPLE_ID[0]}')
 def qc_raw_bam_qualimap_report(input_bam, output_dir):
     qualimap_bam(input_bam, output_dir)
@@ -845,13 +868,13 @@ def qc_gatk_bam_target_coverage_metrics(input_bam, output, output_prefix):
     """ Generate target-level coverage stats for gatk bam """
     bam_target_coverage_metrics(input_bam, output_prefix)
 
-@merge(qc_gatk_bam_target_coverage_metrics, os.path.join(cwd,'qc','sample_coverage.multisample.tsv')) 
+@merge(qc_gatk_bam_target_coverage_metrics, os.path.join(runs_scratch_dir,'qc','sample_coverage.multisample.tsv')) 
 def qc_gatk_merge_sample_summary_stats(inputs, output):
     run_cmd("head -n1 {input} > {out}".format(input=inputs[0], out=output), "", run_locally=True)
     for input in inputs:
         run_cmd("head -n2 {input} | tail -n1 >> {out}".format(input=input, out=output), "", run_locally=True)
 
-@follows(mkdir(os.path.join(cwd,'qc')))
+@follows(mkdir(os.path.join(runs_scratch_dir,'qc')))
 @transform(recalibrate_baseq2, 
            formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), 
            '{subpath[0][1]}/qc/{SAMPLE_ID[0]}.gene_coverage.interval_summary',
@@ -861,12 +884,12 @@ def qc_gatk_bam_gene_coverage_metrics(input_bam, output, output_prefix):
     """ Generate gene-level coverage stats for gatk bam """
     bam_gene_coverage_metrics(input_bam, output_prefix)
     
-@merge(qc_gatk_bam_gene_coverage_metrics, os.path.join(cwd,'qc','gene_coverage.multisample.tsv')) 
+@merge(qc_gatk_bam_gene_coverage_metrics, os.path.join(runs_scratch_dir,'qc','gene_coverage.multisample.tsv')) 
 def qc_gatk_merge_gene_interval_summary_stats(inputs, output):
     run_cmd("paste {inputs} > {output}".format(inputs=" ".join(inputs), output=output), 
             "", run_locally=True)
     
-@follows(mkdir(os.path.join(cwd,'qc')), mkdir(os.path.join(cwd,'qc','qualimap')))
+@follows(mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','qualimap')))
 @transform(recalibrate_baseq2, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{subpath[0][1]}/qc/qualimap/{SAMPLE_ID[0]}')
 def qc_gatk_bam_qualimap_report(input_bam, output_dir):
     """ Produces qualimap report for gatk bam """
@@ -906,7 +929,7 @@ def call_haplotypes(bam, output_gvcf):
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir, mem_per_cpu=6144)
 
 
-@merge(call_haplotypes, 'multisample.gatk.gvcf')
+@merge(call_haplotypes, os.path.join(runs_scratch_dir, run_id+'.multisample.gvcf'))
 def merge_gvcfs(gvcfs, merged_gvcf):
     """Combine the per-sample GVCF files into one project-wide GVCF""" 
     args = "-T CombineGVCFs \
@@ -924,7 +947,7 @@ def merge_gvcfs(gvcfs, merged_gvcf):
 def call_with_gvcfs_as_arguments_task(gvcfs):
     pass
 
-@merge([merge_gvcfs, call_with_gvcfs_as_arguments_task], 'multisample.gatk.vcf')
+@merge([merge_gvcfs, call_with_gvcfs_as_arguments_task], os.path.join(runs_scratch_dir, run_id+'.multisample.vcf'))
 def genotype_gvcfs(gvcfs, output):
     """ Genotype this project's merged GVCF together with other project-wide GVCF files (provided in settings) """
     args = "-T GenotypeGVCFs \
@@ -947,7 +970,8 @@ def genotype_gvcfs(gvcfs, output):
 
 #@follows(call_variants)
 @follows(genotype_gvcfs)
-@files('multisample.gatk.vcf', ['multisample.gatk.snp.model','multisample.gatk.snp.model.tranches'])
+@transform(genotype_gvcfs, suffix('.vcf'), [r'\1.snp.model', r'\1.snp.model.tranches'])
+#@files('multisample.gatk.vcf', ['multisample.gatk.snp.model','multisample.gatk.snp.model.tranches'])
 def find_snp_tranches_for_recalibration(vcf,outputs):
     """Runs VariantRecalibrator on snps"""
     args = "-T VariantRecalibrator \
@@ -981,7 +1005,8 @@ def find_snp_tranches_for_recalibration(vcf,outputs):
 
 
 @follows(find_snp_tranches_for_recalibration)
-@files('multisample.gatk.vcf', ['multisample.gatk.indel.model','multisample.gatk.indel.model.tranches'])
+@transform(genotype_gvcfs, suffix('.vcf'), [r'\1.indel.model', r'\1.indel.model.tranches'])
+#@files('multisample.gatk.vcf', ['multisample.gatk.indel.model','multisample.gatk.indel.model.tranches'])
 def find_indel_tranches_for_recalibration(vcf,outputs):
     """Runs VariantRecalibrator on indels"""
     args = "-T VariantRecalibrator \
@@ -1035,14 +1060,24 @@ def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP',t
 
 
 
-@follows(find_indel_tranches_for_recalibration)
-@files(['multisample.gatk.vcf','multisample.gatk.snp.model','multisample.gatk.snp.model.tranches'],'multisample.gatk.recalibratedSNPS.rawIndels.vcf')
+#@follows(find_indel_tranches_for_recalibration)
+#@files(['multisample.gatk.vcf','multisample.gatk.snp.model','multisample.gatk.snp.model.tranches'],'multisample.gatk.recalibratedSNPS.rawIndels.vcf')
+@collate(find_snp_tranches_for_recalibration, 
+         regex(r'(.+)/([^/]+)/(.+\.multisample).snp.model*'), 
+         r'\1/\2/\3.recalibratedSNPs.rawIndels.vcf', 
+         add_inputs(r'\1/\2/\3.vcf'))
+#os.path.join(runs_scratch_dir,run_id,run_id+'multisample.vcf')))
 def apply_recalibration_filter_snps(inputs,output):
-    apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='SNP',tranche_filter=99.9)
+    #apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='SNP',tranche_filter=99.9)
+    apply_recalibration_to_snps_or_indels(inputs[2],inputs[0],inputs[1],output,mode='SNP',tranche_filter=99.9)
 
 
 @follows(apply_recalibration_filter_snps)
-@files(['multisample.gatk.recalibratedSNPS.rawIndels.vcf','multisample.gatk.indel.model','multisample.gatk.indel.model.tranches'],'multisample.gatk.recalibrated.vcf')
+#@files(['multisample.gatk.recalibratedSNPS.rawIndels.vcf','multisample.gatk.indel.model','multisample.gatk.indel.model.tranches'],'multisample.gatk.recalibrated.vcf')
+@collate(find_indel_tranches_for_recalibration, 
+         regex(r'(.+)/([^/]+)/(.+\.multisample).snp.model*'), 
+         r'\1/\2/\3.recalibrated.vcf', 
+         add_inputs(r'\1/\2/\3.recalibratedSNPs.rawIndels.vcf'))
 def apply_recalibration_filter_indels(inputs,output):
     apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='INDEL',tranche_filter=99.0)
     
@@ -1067,9 +1102,9 @@ def final_calls(input_vcf, output_vcf):
 
 
 def split_snp_parameters():
-    exome_vcf = 'multisample.gatk.analysisReady.exome.vcf'
+    exome_vcf = os.path.join(runs_scratch_dir, run_id+'.multisample.analysisReady.exome.vcf')
     for s_id in get_sample_ids():
-        yield [exome_vcf, s_id + '/' + s_id + '.exome.vcf', s_id]
+        yield [exome_vcf, os.path.join(runs_scratch_dir, s_id, s_id + '.exome.vcf'), s_id]
 
 
 @follows('final_calls')
@@ -1095,8 +1130,8 @@ def split_snps(vcf, output, sample):
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx2g" % tmp_dir, mem_per_cpu=2048)
 
 
-@follows(mkdir(os.path.join(cwd,'qc')))
-@merge(split_snps, os.path.join(cwd,'qc','variant_qc'))
+@follows(mkdir(os.path.join(runs_scratch_dir,'qc')))
+@merge(split_snps, os.path.join(runs_scratch_dir,'qc','variant_qc'))
 def variants_qc(vcf, output):
     """ Generate variant QC table for all samples """    
     args = "-T VariantEval \
@@ -1127,27 +1162,22 @@ def archive_results():
     # if optional results_archive was not provided - do nothing
     if results_archive == None: return
     
-    run_name = os.path.basename(os.getcwd())
-    arch_path = os.path.join(results_archive, run_name)
+    arch_path = os.path.join(results_archive, run_id)
     if not os.path.exists(arch_path): os.mkdir(arch_path)
-    run_cmd("cp */*.gatk.bam %s" % arch_path, "", run_locally=True)
-    run_cmd("cp */*.gatk.bam.gene_coverage* %s" % arch_path, "", run_locally=True)
-    run_cmd("cp */*.exome.vcf %s" % arch_path, "", run_locally=True)
-    run_cmd("cp multisample.gatk.gvcf %s" % os.path.join(results_archive,run_name+".multisample.gatk.gvcf"),
+    run_cmd("cp %s/*/*.gatk.bam %s" % (runs_scratch_dir,arch_path), "", run_locally=True)
+    run_cmd("cp %s/*/*.gatk.bam.gene_coverage* %s" % (runs_scratch_dir,arch_path), "", run_locally=True)
+    run_cmd("cp %s/*/*.exome.vcf %s" % (runs_scratch_dir,arch_path), "", run_locally=True)
+    run_cmd("cp %s/*.multisample.gvcf %s" % (runs_scratch_dir, results_archive),
             "", run_locally=True)
-    run_cmd("cp -r qc %s" % arch_path, "", run_locally=True)
+    run_cmd("cp -r %s/qc %s" % (runs_scratch_dir,arch_path), "", run_locally=True)
 
 
 def cleanup_files():
-    run_cmd("rm -rf */*.recal_data.csv */*.realign* */*.dedup* */*.log *.log \
-            *.to_filter* multisample.gatk.snp.recal batch* \
-            multisample.gatk.recalibratedSNPS.rawIndels.vcf \
-            multisample.gatk.indel.model.* multisample.gatk.snp.model.* \
-            multisample.gatk.analysisReady.vcf.vcfidx \
-            multisample.gatk.analysisReady.vcf.idx \
-            multisample.gatk.recalibratedSNPS.rawIndels.vcf.idx","",
-            run_locally=True)
-#            multisample.gatk.analysisReady.vcf \
+    run_cmd("rm -rf {dir}/*/*.recal_data.csv {dir}/*/*.realign* {dir}/*/*.dedup* \
+            {dir}/*.multisample.indel.model* {dir}/*.multisample.snp.model* \
+            {dir}/*/*.log {dir}/*.multisample.recalibratedSNPS.rawIndels.vcf* \
+            {dir}/*.multisample.recalibrated.vcf* \
+            ".format(dir=runs_scratch_dir), "", run_locally=True)
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
