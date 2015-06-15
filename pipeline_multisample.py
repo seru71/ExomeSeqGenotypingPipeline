@@ -593,12 +593,12 @@ def trim_reads(inputs, output):
 # FASTQ filenames are expected to have following format:
 #    [SAMPLE_ID]_[LANE_ID].fq[1|2].gz
 # In this step, the fq1 file coming from trim_reads is matched with the fq2 file and mapped together. 
-# The output will be written to SAM file:
-#    [SAMPLE_ID]_[LANE_ID].sam
+# The output will be written to BAM file:
+#    [SAMPLE_ID]_[LANE_ID].bam
 #
 #@collate(trim_reads, regex(r"([^_]+_[^_]+)\.fq[12]\.gz$"), r'\1.sam')
-@transform(trim_reads, suffix('.fq1.gz'), add_inputs(r'\1.fq2.gz'), '.sam')
-def align_reads(fastqs, sam):
+@transform(trim_reads, suffix('.fq1.gz'), add_inputs(r'\1.fq2.gz'), '.bam')
+def align_reads(fastqs, bam):
     threads = 2
     
     # construct read group information from fastq file name (assuming [SAMPLE_ID]_[LANE_ID].fq[1|2].gz format)
@@ -608,28 +608,30 @@ def align_reads(fastqs, sam):
     read_group = "@RG\\tID:{id}\\tSM:{sm}\\tLB:{lb}\\tPL:{pl}\\tPU:{pu} \
                  ".format(id=sample_lane, sm=sample, lb=sample, pl="ILLUMINA", pu=lane)
                  
-    args = "mem -t {threads} -R '{rg}' {ref} {fq1} {fq2} > {sam} \
-            ".format(threads=threads, rg=read_group, ref=reference, 
-                     fq1=fastqs[0], fq2=fastqs[1], sam=sam)
-    run_cmd(bwa, args, cpus=threads, mem_per_cpu=8192/threads)
+    args = "mem -t {threads} -R {rg} {ref} {fq1} {fq2} \
+	    ".format(threads=threads, rg=read_group, ref=reference, 
+                     fq1=fastqs[0], fq2=fastqs[1])
+    iargs = "samtools view -b -o {bam} -".format(bam=bam)
+
+    run_cmd(bwa, args, interpreter_args=iargs, cpus=threads, mem_per_cpu=8192/threads)
     
 
 #
-# SAM filenames are expected to have following format:
-#    [SAMPLE_ID]_[LANE_ID].sam
-# In this step, all SAM files matching on the SAMPLE_ID will be merged into one BAM file:
+# BAM filenames are expected to have following format:
+#    [SAMPLE_ID]_[LANE_ID].bam
+# In this step, all BAM files matching on the SAMPLE_ID will be merged into one BAM file:
 #    [SAMPLE_ID].bam
 #
-@collate(align_reads, regex(r"([^_]+).+\.sam$"),  r'\1.bam')
-def merge_lanes(lane_sams, bam):
+@collate(align_reads, regex(r"([^_]+).+\.bam$"),  r'\1.bam')
+def merge_lanes(lane_bams, out_bam):
     args = "MergeSamFiles O={bam} \
             ASSUME_SORTED=false \
             MAX_RECORDS_IN_RAM=2000000 \
             USE_THREADING=true \
-            ".format(bam=bam)
-    # include all sam files as args
-    for sam in lane_sams:
-        args += " I={sam}".format(sam=sam)
+            ".format(bam=out_bam)
+    # include all bam files as args
+    for bam in lane_bams:
+        args += " I={bam}".format(bam=bam)
         
     run_cmd(picard, args, interpreter_args="-Xmx8g", cpus=4, mem_per_cpu=2048)
     
@@ -647,15 +649,15 @@ def generate_bam_inputs():
             yield job_parameters
 
 
-def clean_fastqs_and_sam():
-    """ Remove the trimmed fastq files, and SAM files. Links to original fastqs are kept """
+def clean_fastqs_and_lane_bams():
+    """ Remove the trimmed fastq files, and lane-BAM files. Links to original fastqs are kept """
     for f in glob.glob(os.path.join(cwd,'*','*.fq[12]*.gz')):
         os.remove(f)
-    for f in glob.glob(os.path.join(cwd,'*','*.sam')):
+    for f in glob.glob(os.path.join(cwd,'*','*_L\d\d\d.bam')):
         os.remove(f)
 
 
-@posttask(clean_fastqs_and_sam)
+@posttask(clean_fastqs_and_lane_bams)
 @transform(merge_lanes, suffix(".bam"), '.bam.bai')
 def index(bam, output):
     """Create raw bam index"""
