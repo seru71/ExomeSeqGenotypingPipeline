@@ -227,7 +227,8 @@ if __name__ == '__main__':
     docker = " ".join([docker_bin, docker_args]) 
     
     # Inputs 
-    input_bams = os.path.join(runs_scratch_dir, config.get('Inputs','input-bams'))
+    try: input_bams = os.path.join(runs_scratch_dir, config.get('Inputs','input-bams'))
+    except ConfigParser.NoOptionError: input_bams=None
     
     # variant calls from other projects to call together with (semicolon separated list)
     try: 
@@ -235,8 +236,8 @@ if __name__ == '__main__':
         #print 'Calling will be done together with:'
         #for p in call_with_gvcfs:
         #	print '\t',p
-    except ConfigParser.NoOptionError: 
-        call_with_gvcfs = [] 
+    except ConfigParser.NoOptionError: call_with_gvcfs = [] 
+    
     
     # reference files
     reference = os.path.join(reference_root, config.get('Resources','reference-genome'))
@@ -261,7 +262,91 @@ if __name__ == '__main__':
     picard = config.get('Tools','picard-tools')
     qualimap = config.get('Tools','qualimap')
     gatk = config.get('Tools','gatk')
-    vcftools = config.get('Tools','vcftools')
+
+
+#88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
+
+#   Logger
+
+
+#88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
+
+
+
+if __name__ == '__main__':
+    import logging
+    import logging.handlers
+
+    MESSAGE = 15
+    logging.addLevelName(MESSAGE, "MESSAGE")
+
+    def setup_std_logging (logger, log_file, verbose):
+        """
+        set up logging using programme options
+        """
+        class debug_filter(logging.Filter):
+            """
+            Ignore INFO messages
+            """
+            def filter(self, record):
+                return logging.INFO != record.levelno
+
+        class NullHandler(logging.Handler):
+            """
+            for when there is no logging
+            """
+            def emit(self, record):
+                pass
+
+        # We are interesting in all messages
+        logger.setLevel(logging.DEBUG)
+        has_handler = False
+
+        # log to file if that is specified
+        if log_file:
+            handler = logging.FileHandler(log_file, delay=False)
+            handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)6s - %(message)s"))
+            handler.setLevel(MESSAGE)
+            logger.addHandler(handler)
+            has_handler = True
+
+        # log to stderr if verbose
+        if verbose:
+            stderrhandler = logging.StreamHandler(sys.stderr)
+            stderrhandler.setFormatter(logging.Formatter("    %(message)s"))
+            stderrhandler.setLevel(logging.DEBUG)
+            if log_file:
+                stderrhandler.addFilter(debug_filter())
+            logger.addHandler(stderrhandler)
+            has_handler = True
+
+        # no logging
+        if not has_handler:
+            logger.addHandler(NullHandler())
+
+
+    #
+    #   set up log
+    #
+    module_name = "exome"
+    logger = logging.getLogger(module_name)
+    setup_std_logging(logger, options.log_file, options.verbose)
+
+    #
+    #   Allow logging across Ruffus pipeline
+    #
+    def get_logger (logger_name, args):
+        return logger
+
+    from ruffus.proxy_logger import *
+    (logger_proxy,
+     logging_mutex) = make_shared_logger_and_proxy (get_logger,
+                                                    module_name,
+                                                    {})
+
+
+
+
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
@@ -396,85 +481,15 @@ def qualimap_bam(input_bam, output_dir):
                                 dir=output_dir),
             interpreter_args="")
 
+def get_sample_ids():
+    """ Provides meaningful result only after HaplotypeCaller step"""
+    files = glob.glob(os.path.join(runs_scratch_dir,'*','*.gvcf'))
+    return [ os.path.splitext(os.path.basename(f))[0] for f in files ]
+
+def get_num_files():
+    """ Provides meaningful result only after HaplotypeCaller step"""
+    return len(get_sample_ids())
     
-
-#88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
-
-#   Logger
-
-
-#88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
-
-if __name__ == '__main__':
-    import logging
-    import logging.handlers
-
-    MESSAGE = 15
-    logging.addLevelName(MESSAGE, "MESSAGE")
-
-    def setup_std_logging (logger, log_file, verbose):
-        """
-        set up logging using programme options
-        """
-        class debug_filter(logging.Filter):
-            """
-            Ignore INFO messages
-            """
-            def filter(self, record):
-                return logging.INFO != record.levelno
-
-        class NullHandler(logging.Handler):
-            """
-            for when there is no logging
-            """
-            def emit(self, record):
-                pass
-
-        # We are interesting in all messages
-        logger.setLevel(logging.DEBUG)
-        has_handler = False
-
-        # log to file if that is specified
-        if log_file:
-            handler = logging.FileHandler(log_file, delay=False)
-            handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)6s - %(message)s"))
-            handler.setLevel(MESSAGE)
-            logger.addHandler(handler)
-            has_handler = True
-
-        # log to stderr if verbose
-        if verbose:
-            stderrhandler = logging.StreamHandler(sys.stderr)
-            stderrhandler.setFormatter(logging.Formatter("    %(message)s"))
-            stderrhandler.setLevel(logging.DEBUG)
-            if log_file:
-                stderrhandler.addFilter(debug_filter())
-            logger.addHandler(stderrhandler)
-            has_handler = True
-
-        # no logging
-        if not has_handler:
-            logger.addHandler(NullHandler())
-
-
-    #
-    #   set up log
-    #
-    module_name = "exome"
-    logger = logging.getLogger(module_name)
-    setup_std_logging(logger, options.log_file, options.verbose)
-
-    #
-    #   Allow logging across Ruffus pipeline
-    #
-    def get_logger (logger_name, args):
-        return logger
-
-    from ruffus.proxy_logger import *
-    (logger_proxy,
-     logging_mutex) = make_shared_logger_and_proxy (get_logger,
-                                                    module_name,
-                                                    {})
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
@@ -487,49 +502,18 @@ if __name__ == '__main__':
 from ruffus import *
 
 
-
-def get_sample_ids():
-    #files = glob.glob(input_bams)
-    #return [ os.path.splitext(os.path.basename(f))[0] for f in files ]
-    
-    files = glob.glob(os.path.join(runs_scratch_dir,'*','*.gvcf'))
-    return [ os.path.splitext(os.path.basename(f))[0] for f in files ]
-    # expect files in form /path/to/data/dir/[SAMPLE_ID]_[LANE_ID]_R[1|2]_001.bcl
-    # and return a list of unique sorted SAMPLE_IDs
-   # ids = [ (os.path.splitext(os.path.basename(f))[0]).split('_')[0] for f in files ]
-   # uniq_ids = list(set(ids))
-   # uniq_ids.sort()
-   # return uniq_ids
-
-def get_num_files():
-    return len(get_sample_ids())
-
-def are_fastqs_converted(_,__):
-#    fastqs = glob.glob(os.path.join(runs_scratch_dir,'fastqs','*.fastq.gz'))
-#    print(fastqs)
-
-#    for fastq in fastqs:
-#        if not fastq.startswith('Undetermined'): 
-#            return False, 'FASTQ file %s found. Skipping bcl2fastq conversion' % os.path.basename(fastq)
-#   return True, 'No FASTQ files found'
-    if os.path.exists(os.path.join(runs_scratch_dir,'fastqs','completed')):
-        return False, 'Found bcl2fastq completion flag'
-    return True, 'Missing bcl2fastq completion flag'
-
-
 #
-# Preprocess the reads, only if fastqs don't exist
 #
+# Prepare FASTQ
+# 
+
 @follows(mkdir(runs_scratch_dir), mkdir(os.path.join(runs_scratch_dir,'fastqs')))
 @files(options.run_folder, os.path.join(runs_scratch_dir,'fastqs','completed'))
-#@check_if_uptodate(are_fastqs_converted)
 @posttask(touch_file(os.path.join(runs_scratch_dir,'fastqs','completed')))
 def bcl2fastq_conversion(run_directory, completed_flag):
     """ Run bcl2fastq conversion and create fastq files in the run directory"""
     out_dir = os.path.join(runs_scratch_dir,'fastqs')
     interop_dir = os.path.join(out_dir,'InterOp')
-#    if not os.path.exists(out_dir):
-#        os.mkdir(out_dir) 
 
     # r, w, d, and p specify numbers of threads to be used for each of the concurrent subtasks of the conversion (see bcl2fastq manual) 
     args = "-R {indir} -o {outdir} --interop-dir={interopdir} -r1 -w1 -d2 -p4 \
@@ -538,23 +522,18 @@ def bcl2fastq_conversion(run_directory, completed_flag):
         args += " --tiles %s" % options.run_on_bcl_tile
     run_cmd(bcl2fastq, args, cpus=8, mem_per_cpu=2048)
     
-    # touch a flag indicating that it has finished conversion
-    #open(os.path.join(out_dir,'completed'),'w').close()
 
 
 @active_if(fastq_archive != None)
 @transform(bcl2fastq_conversion, formatter(".+/(?P<RUN_ID>[^/]+)/fastqs/completed"), str(fastq_archive)+"/{RUN_ID[0]}")
-# if we should overwrite...
-#@follows(bcl2fastq_conversion)
-#@transform(os.path.join(cwd,'fastqs','*.fastq.gz'), formatter(".+/(?P<RUN_ID>[^/]+)/fastqs/(?P<FNAME>.+).fastq.gz"), 
-#						fastq_archive+"/{RUN_ID[0]}/{FNAME[0]}.fastq.gz")
 def archive_fastqs(completed_flag, archive_dir):
     """ Archive fastqs """    
     fq_dir = os.path.dirname(completed_flag)
 
-    if os.path.exists(archive_dir):
-	import time
-	archive_dir += "_archived_"+str(time.strftime("%Y%m%d_%H%M%S"))
+# uncomment if archive should not be overwritten (risk of creating many archives of the same run)
+#    if os.path.exists(archive_dir):
+#	import time
+#	archive_dir += "_archived_"+str(time.strftime("%Y%m%d_%H%M%S"))
 
     import shutil
     shutil.move(fq_dir, archive_dir)
@@ -567,12 +546,13 @@ def archive_fastqs(completed_flag, archive_dir):
 # Prepare directory for every sample and link the input fastq files
 # Expected format:
 #    /path/to/file/[SAMPLE_ID]_S[1-9]\d?_L\d\d\d_R[12]_001.fastq.gz
+# SAMPLE_ID can contain all signs except path delimiter, i.e. "\"
 #
 @jobs_limit(1)    # to avoid problems with simultanous creation of the same sample dir
 @follows(archive_fastqs)
 @subdivide(os.path.join(runs_scratch_dir,'fastqs','*.fastq.gz'),
-           formatter('.+/(?P<SAMPLE_ID>[^/]+)_S[1-9]\d?_L\d\d\d_R[12]_001\.fastq\.gz$'), 
-           '{SAMPLE_ID[0]}/{basename[0]}{ext[0]}')
+           formatter('(?P<PATH>.+)/(?P<SAMPLE_ID>[^/]+)_S[1-9]\d?_L\d\d\d_R[12]_001\.fastq\.gz$'), 
+           '{subpath[0][1]}/{SAMPLE_ID[0]}/{basename[0]}{ext[0]}')
 def link_fastqs(fastq_in, fastq_out):
     """Make working directory for every sample and link fastq files in"""
     if not os.path.exists(os.path.dirname(fastq_out)):
@@ -589,8 +569,9 @@ def link_fastqs(fastq_in, fastq_out):
 # The output will be written to two FASTQ files
 #    [SAMPLE_ID]_[LANE_ID].fq1.gz
 #    [SAMPLE_ID]_[LANE_ID].fq2.gz
+# SAMPLE_ID can contain all signs except path delimiter, i.e. "\"
 #
-@collate(link_fastqs, regex(r'([^_]+)_S[1-9]\d?_(L\d\d\d)_R[12]_001\.fastq\.gz$'),  r'\1_\2.fq1.gz')
+@collate(link_fastqs, regex(r'(.+)/([^/]+)_S[1-9]\d?_(L\d\d\d)_R[12]_001\.fastq\.gz$'),  r'\1/\2_\3.fq1.gz')
 def trim_reads(inputs, output):
     outfq1 = output
     outfq2 = output.replace('fq1.gz','fq2.gz')
@@ -610,6 +591,13 @@ def trim_reads(inputs, output):
                                        adapter=adapters)
     max_mem = 2048
     run_cmd(trimmomatic, args, interpreter_args="-Xmx"+str(max_mem)+"m", cpus=1, mem_per_cpu=max_mem)
+
+
+#
+#
+# Align reads and create raw BAM files (one per sample)
+# 
+
 
 
 #
@@ -644,8 +632,10 @@ def align_reads(fastqs, bam):
 #    [SAMPLE_ID]_[LANE_ID].bam
 # In this step, all BAM files matching on the SAMPLE_ID will be merged into one BAM file:
 #    [SAMPLE_ID].bam
+# SAMPLE_ID can contain all signs except path delimiter, i.e. "\"
 #
-@collate(align_reads, regex(r"([^_]+).+\.bam$"),  r'\1.bam')
+@jobs_limit(4)    # to avoid filesystem problems 
+@collate(align_reads, regex(r"(.+)/([^/]+).+\.bam$"),  r'\1/\2.bam')
 def merge_lanes(lane_bams, out_bam):
     args = "MergeSamFiles O={bam} \
             ASSUME_SORTED=false \
@@ -660,14 +650,27 @@ def merge_lanes(lane_bams, out_bam):
     
 
 #
-# For bam-level entry to the pipeline. 
+# NOT USED
+# 
+# For bam-level entry to the pipeline, create a following scratch dir structure:
+# DATA_ROOT/
+#     RUN_ID/
+#         SAMPLE_1/
+#             SAMPLE_1.bam
+#         SAMPLE_2/
+#             SAMPLE_2.bam
+#         ...
+#
+# Provide RUN_ID/*/*.bam as input-bams setting in the settings file, and change decorators of index task to sth like:
+#     @files(generate_bam_inputs)
+# All prior pipeline steps have to disabled (or mocked up-to-date)
 #
 def generate_bam_inputs():
     files = glob.glob(input_bams)
     parameters = []
     for f in files:
         prefix = os.path.splitext(os.path.basename(f))[0]
-        parameters.append([None,prefix + '/' + prefix + '.bam', [prefix,os.path.abspath(f)]])
+        parameters.append([f, f+'.bai'])
     for job_parameters in parameters:
             yield job_parameters
 
@@ -734,17 +737,10 @@ def raw_bam_qc():
 # Prepare the bam files for variant calling
 #
 
-def dup_removal_picard(bam,output):
-    """Use Picard to remove duplicates"""
-    args = "CleanSam \
-           INPUT={bam} \
-           OUTPUT={out} \
-           VALIDATION_STRINGENCY=LENIENT \
-           VERBOSITY=ERROR CREATE_INDEX=TRUE \
-           ".format(bam=bam, out=output)
-    run_cmd(picard, args, interpreter_args="-Xmx4g", mem_per_cpu=4096)
-   
-def dup_mark_picard(bam,output):
+
+@follows(index)
+@transform(merge_lanes, suffix(".bam"), '.dedup.bam')
+def remove_dups(bam, output):
     """Use Picard to mark duplicates"""
     args = "MarkDuplicates \
             TMP_DIR={tmp} \
@@ -759,20 +755,11 @@ def dup_mark_picard(bam,output):
     run_cmd(picard, args, interpreter_args="-Xmx4g", mem_per_cpu=4096)
 
 
-@follows(index)
-@transform(merge_lanes, suffix(".bam"), '.dedup.bam')
-def remove_dups(bam, output):
-    """Mark duplicates"""
-    #run_cmd(samtools,"rmdup %s %s" % (bam,output))
-    dup_mark_picard(bam, output)
-    # remove(input)
-
-
 #@follows(remove_dups)
-@transform(remove_dups, suffix(".dedup.bam"), '.dedup.bam.bai')
-def index_dups(bam, output):
-    """Create bam index"""
-    index_bam(bam)
+#@transform(remove_dups, suffix(".dedup.bam"), '.dedup.bam.bai')
+#def index_dups(bam, output):
+#    """Create bam index"""
+#    index_bam(bam)
 
 
 #@transform(index_dups, suffix(".dedup.bam.bai"), '.realign.intervals', r'\1.dedup.bam')
