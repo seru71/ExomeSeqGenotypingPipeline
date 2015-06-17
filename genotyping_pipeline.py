@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 
-    pipeline_multisample.py
+    genotyping_pipeline.py
                         --run_folder PATH
                         [--settings PATH] (by default RUN_FOLDER/settings.cfg)
                         [--log_file PATH]
