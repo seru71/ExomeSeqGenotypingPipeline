@@ -390,7 +390,7 @@ def produce_variant_annotation_table(inputs, outputs):
     f = open(rare_var_fun)
     for l in f.xreadlines():
         lsplit=l.split('\t')
-        if lsplit[0] == 'splicing':
+        if 'splicing' in (lsplit[0]).split(';'):
             f_out.write(string.join(lsplit[2:],'\t'))
     f.close()
     f_out.close()
@@ -642,14 +642,14 @@ def produce_variant_stats_table(infiles, table_file):
         out.write(os.path.basename(raw_variant_files[i][0]).split('.')[0])
         for fname in [raw_variant_files[i][0], kg1_filtered_variant_files[i][0], \
                         inhouse_filtered_variant_files[i][0]]: # exonic variant stats of raw variants and rare variants
-            counts = dict.fromkeys(var_types,'0')
+            counts = dict.fromkeys(var_types,0)
             f=open(fname)        
             for l in f.xreadlines():
                 for var_type in var_types:
                     if l.find(' '+var_type)>0:
-                        counts[var_type] = l.split()[0]
+                        counts[var_type] += int(l.split()[0])
                         break
-            out.write('\t'+'\t'.join([counts[t] for t in var_types]))
+            out.write('\t'+'\t'.join([str(counts[t]) for t in var_types]))
             f.close()
 
         for fname in [raw_variant_files[i][1], kg1_filtered_variant_files[i][1], \
