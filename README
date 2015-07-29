@@ -1,19 +1,58 @@
-# bin directory
 
-Contains all links to all the pipeline programs
+# ExomeSeq Genotyping Pipeline 
+
 
 
 ## Pipeline
 
-The NGS pipeline can be run using one of two python scripts:
+The pipeline consists of SAMtools, Picard-tools, GATK, and VCFTools 
 
-### pipeline_multisample.py
 
-Main pipeline script for *multi sample analysis*.
+
+## Setup
+
+### Pipeline
+
+1. Install Python if you don't have it from before, and a cool python package - `Ruffus` (http://www.ruffus.org.uk/). 
+You might also need following packages: optparse, logging, shutil
+
+2. Clone the pipeline repository:
+`git clone https://github.com/seru71/ExomeSeqGenotypingPipeline.git <PIPELINE_HOME>`
+
+The pipeline is ready now, but you will need all of its components to perform the analysis.
+
+### Pipeline components
+
+Install following tools:
+1. SAMtools (https://github.com/samtools/samtools)
+2. Picard-tools (http://broadinstitute.github.io/picard)
+3. GATK (https://www.broadinstitute.org/gatk/download)
+4. VCFtools (https://vcftools.github.io)
+
+Optional tool for some QC tasks:
+5. QualiMap (http://qualimap.bioinfo.cipf.es)
+
+### Reference data
+
+1. Download resource bundle from GATK (1000Genomes version preferably):
+https://www.broadinstitute.org/gatk/download
+
+2. Unpack it in a directory of your choice (e.g. reference), and prepare the reference genome for use with GATK as recommended:
+http://gatkforums.broadinstitute.org/discussion/1601/how-can-i-prepare-a-fasta-file-to-use-as-reference
+ 
+3. Download/create BED files representing target regions of you exome capture assay. The pipeline supports two interval files:
+`capture` - used for QC metrics (QualiMap, depth of coverage reports, etc.)
+`exome`   - usually superset of `capture`; used to limit data processing to these regions. No variants outside of these intervals will be reported.
+They can be the exact same file, but sometimes one wants to add flanking sequence to the capture (e.g. +/-10bp) when filtering variants. 
+Both files should be prepared in advance.     
+
+
+
+## Usage
 
 *   Running the script
 
-    You can run the script using `python ~/bin/pipeline_multisample.py`.
+    You can run the script using `python ~/tools/ExomeSeqGenotypingPipeline/pipeline_multisample.py`.
     A list of possible options will be presented. The only required option is `--pipeline_settings`,
     which accepts a config file with paths to input bam files, resources (e.g. reference genome, database, capture regions), 
     and right versions of software. See an exemplary file for all required options 
