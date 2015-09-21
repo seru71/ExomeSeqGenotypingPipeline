@@ -171,68 +171,81 @@ if __name__ == '__main__':
         if options.pipeline_settings == None:
             options.pipeline_settings = os.path.join(options.run_folder, 'settings.cfg')
         config.read(options.pipeline_settings)
-    except FileNotFound:
+    except IOError:
         raise Exception('Provided settings file [%s] does not exist or cannot be read.' % options.pipeline_settings)
 
 
-    # Root dirs
-    reference_root = config.get('Docker','reference-root')
+    # Should dockerized execution be used?
+    dockerize = True
+    try:
+        docker_bin = config.get('Docker','docker-binary')
+        print 'Found docker-binary setting. Using dockerized execution mode.'
+    except ConfigParser.NoOptionError:
+        print 'Docker-binary setting is missing. Using regular execution mode.'
+        dockerize = False
+ 
+ 
+    if dockerize:
+        # Root paths
+        reference_root = config.get('Docker','reference-root')
     
-    run_id = os.path.dirname(options.run_folder)    # get ID of the run and use it to create scratch results folder
-    runs_scratch_dir = os.path.join(config.get('Docker','scratch-root'), run_id)
+        run_id = os.path.dirname(options.run_folder)    # get ID of the run and use it to create scratch results folder
+        runs_scratch_dir = os.path.join(config.get('Docker','scratch-root'), run_id)
       
-    # optional results and fastq archive dirs  
-    results_archive = None
-    try:
-        results_archive = config.get('Docker','results-archive')
-    except ConfigParser.NoOptionError:
-        print 'No results-archive provided. Results will not be archived outside of the current (working) directory.'
+        # optional results and fastq archive dirs  
+        results_archive = None
+        try:
+            results_archive = config.get('Docker','results-archive')
+        except ConfigParser.NoOptionError:
+            print 'No results-archive provided. Results will not be archived outside of the current (working) directory.'
     
-    fastq_archive = None
-    try:
-        fastq_archive = config.get('Docker','fastq-archive')
-    except ConfigParser.NoOptionError:
-        print 'No fastq-archive provided. Fastq files will not be archived outside of the current (working) directory.'
+        fastq_archive = None
+        try:
+            fastq_archive = config.get('Docker','fastq-archive')
+        except ConfigParser.NoOptionError:
+            print 'No fastq-archive provided. Fastq files will not be archived outside of the current (working) directory.'
 
     
-    # optional /tmp dir
-    tmp_dir = None
-    try:
-        tmp_dir = config.get('Docker','tmp-dir')
-    except ConfigParser.NoOptionError:
-        print 'No tmp-dir provided. Container\'s /tmp will be used.'
+        # optional /tmp dir
+        tmp_dir = None
+        try:
+            tmp_dir = config.get('Docker','tmp-dir')
+        except ConfigParser.NoOptionError:
+            print 'No tmp-dir provided. Container\'s /tmp will be used.'
     
     
-    # Docker executable and args
-    docker_bin = config.get('Docker','docker-binary')
-    docker_args = config.get('Docker', 'docker-args')
-    docker_args += " -v " + ":".join([options.run_folder, options.run_folder,"ro"])
-    docker_args += " -v " + ":".join([reference_root,reference_root,"ro"])
-
-    # Mount archive dirs as files from them are read (linked fastqs, gvcfs). 
-    # Archiving is not performed by docker, so no write access should be needed.
-    if fastq_archive != None:
-        docker_args += " -v " + ":".join([fastq_archive,fastq_archive,"ro"])
-    if results_archive != None:
-        docker_args += " -v " + ":".join([results_archive,results_archive,"ro"])
-
-    # Tmp, if should be different than the default  
-    if tmp_dir != None: 
-        docker_args += " -v " + ":".join([tmp_dir,tmp_dir,"rw"])
-    else: # set the default value if the tmp-dir was unset
-        tmp_dir = "/tmp"
-        
-    docker_args += " -v " + ":".join([runs_scratch_dir,runs_scratch_dir,"rw"])
-    docker_args += " -w " + runs_scratch_dir
-    docker = " ".join([docker_bin, docker_args]) 
+        # Docker args
+        docker_args = config.get('Docker', 'docker-args')
+        docker_args += " -v " + ":".join([options.run_folder, options.run_folder,"ro"])
+        docker_args += " -v " + ":".join([reference_root,reference_root,"ro"])
     
+        # Mount archive dirs as files from them are read (linked fastqs, gvcfs). 
+        # Archiving is not performed by docker, so no write access should be needed.
+        if fastq_archive != None:
+            docker_args += " -v " + ":".join([fastq_archive,fastq_archive,"ro"])
+        if results_archive != None:
+            docker_args += " -v " + ":".join([results_archive,results_archive,"ro"])
+    
+        # Tmp, if should be different than the default  
+        if tmp_dir != None: 
+            docker_args += " -v " + ":".join([tmp_dir,tmp_dir,"rw"])
+        else: # set the default value if the tmp-dir was unset
+            tmp_dir = "/tmp"
+            
+        docker_args += " -v " + ":".join([runs_scratch_dir,runs_scratch_dir,"rw"])
+        docker_args += " -w " + runs_scratch_dir
+        docker = " ".join([docker_bin, docker_args]) 
+    
+   
     # Inputs 
     try: input_bams = os.path.join(runs_scratch_dir, config.get('Inputs','input-bams'))
     except ConfigParser.NoOptionError: input_bams=None
     
     # variant calls from other projects to call together with (semicolon separated list)
     try: 
-        call_with_gvcfs = [ os.path.join(results_archive, path.strip()) for path in config.get('Inputs','call-with-gvcfs').split(";") ]
+        call_with_gvcfs = config.get('Inputs','call-with-gvcfs').split(';')
+        if dockerize:
+            call_with_gvcfs = [ os.path.join(results_archive, path.strip()) for path in call_with_gvcfs ]
         #print 'Calling will be done together with:'
         #for p in call_with_gvcfs:
         #	print '\t',p
@@ -362,44 +375,41 @@ drmaa_session.initialize()
 
 from ruffus.drmaa_wrapper import run_job, error_drmaa_job
 
-def _run_cmd(cmd, cpus, mem_per_cpu, run_locally):
-    stdout, stderr = '', ''
-    job_options = '--ntasks=1 \
-                    --cpus-per-task={cpus} \
-                    --mem-per-cpu={mem} \
-                    '.format(cpus=cpus, mem=mem_per_cpu)
+   
+"""
+cmd is given in a form:
+    
+    command {args}
+    interpreter {interpreter_args} command {atgs}
+
+The strings {args} and {interpreter_args} are replaced with args and interpreter_args values.
+Examples of correct commands:
+    cmd = "samtools {args}"
+    cmd = "samtools -p param {args}"
+    cmd = "samtools -p2 param {args} -p2 param2"
+    cmd = "java {interpreter_args} -jar myjarfile.jar {args} -extras extra_arg
+    cmd = "java -XmX4G {interpreter_args} -jar myjarfile.jar {args} -extras extra_arg
+"""
+def run_cmd(cmd, args, dockerize, interpreter_args=None, cpus=1, mem_per_cpu=1024, run_locally=False):
+    
+    full_cmd = ("{docker} "+cmd).format(docker = docker if dockerize else "",
+                                        args=args, 
+                                        interpreter_args = interpreter_args if interpreter_args!=None else "")
+
+    stdout, stderr = "", ""
+    job_options = "--ntasks=1 \
+                   --cpus-per-task={cpus} \
+                   --mem-per-cpu={mem}".format(cpus=cpus, mem=mem_per_cpu)
                    
     try:
-        stdout, stderr = run_job(cmd, 
+        stdout, stderr = run_job(full_cmd.strip(), 
                                  job_other_options=job_options,
                                  run_locally = run_locally, 
-                                 retain_job_scripts = True, job_script_directory = 'drmaa/',
+                                 retain_job_scripts = True, job_script_directory = "drmaa/",
                                  drmaa_session = drmaa_session)
     except error_drmaa_job as err:
         raise Exception("\n".join(map(str, ["Failed to run:", cmd, err, stdout, stderr])))
-    
-def run_cmd(cmd, args, interpreter_args=None, cpus=1, mem_per_cpu=1024, run_locally=False, dockerize=True):
-    
-    if dockerize:
 
-#        full_cmd = "{docker} {cmd} \"{args}\"".format(docker=docker,cmd=cmd,args=args)
-#        if interpreter_args!=None and interpreter_args.strip()!="":
-#            full_cmd += " \"{}\"".format(interpreter_args)
-            
-        if interpreter_args==None:
-            full_cmd = "{docker} {cmd} {args}".format(docker=docker,cmd=cmd,args=args)
-        else:
-            full_cmd = "{docker} {cmd} \"{args}\" \"{iargs}\" \
-                    ".format(docker=docker, cmd=cmd, args=args, iargs=interpreter_args)
-    else: 
-        
-        if interpreter_args==None or interpreter_args.strip()=="":
-            full_cmd = "{cmd} {args}".format(cmd=cmd, args=args)
-        else:
-            raise Exception('Not implemented interpreter args in not-dockerized execution.\nWhy would you want to do it anyway?')
-            #full_cmd = "{cmd} \"{args}\" \"{iargs}\"".format(cmd=cmd, args=args, iargs=interpreter_args)
-
-    _run_cmd(full_cmd, cpus, mem_per_cpu, run_locally)
 
 def rename(old_file, new_file):
     """rename file"""
@@ -411,7 +421,7 @@ def remove(f):
                             
 def index_bam(bam):
     """Use samtools to create an index for the bam file"""
-    run_cmd(samtools, "index %s" % bam)
+    run_cmd(samtools, "index %s" % bam, dockerize=dockerize)
                           
 def bam_quality_score_distribution(bam,qs,pdf):
     """Calculates quality score distribution histograms"""
@@ -421,7 +431,7 @@ def bam_quality_score_distribution(bam,qs,pdf):
                     INPUT={bam} \
                     VALIDATION_STRINGENCY=SILENT \
                     ".format(chart=pdf, out=qs, bam=bam),
-            interpreter_args="")
+            interpreter_args="", dockerize=dockerize)
 
 def bam_alignment_metrics(bam,metrics):
     """Collects alignment metrics for a bam file"""
@@ -431,7 +441,7 @@ def bam_alignment_metrics(bam,metrics):
                     INPUT={bam} \
                     VALIDATION_STRINGENCY=SILENT \
                     ".format(ref=reference, out=metrics, bam=bam),
-            interpreter_args="")
+            interpreter_args="", dockerize=dockerize)
     
 def bam_target_coverage_metrics(input_bam, output):
     """ Calculates and outputs bam coverage statistics """
@@ -446,7 +456,7 @@ def bam_target_coverage_metrics(input_bam, output):
                              output=output,
                              input=input_bam,
                              capture=capture), 
-            interpreter_args="-Xmx4g")
+            interpreter_args="-Xmx4g", dockerize=dockerize)
 
 def bam_gene_coverage_metrics(input_bam, output):
     """ Calculates and outputs bam coverage statistics """
@@ -463,7 +473,7 @@ def bam_gene_coverage_metrics(input_bam, output):
                              input=input_bam,
                              capture=capture,
                              genes=gene_coordinates), 
-            interpreter_args="-Xmx4g")
+            interpreter_args="-Xmx4g", dockerize=dockerize)
 
 def qualimap_bam(input_bam, output_dir):
     """ Generates Qualimap bam QC report """
@@ -479,7 +489,7 @@ def qualimap_bam(input_bam, output_dir):
                         ".format(bam=input_bam,
                                 target=capture_qualimap,
                                 dir=output_dir),
-            interpreter_args="")
+            interpreter_args="", dockerize=dockerize)
 
 def get_sample_ids():
     """ Provides meaningful result only after HaplotypeCaller step"""
@@ -520,7 +530,8 @@ def bcl2fastq_conversion(run_directory, completed_flag):
             ".format(indir=run_directory, outdir=out_dir, interopdir=interop_dir)
     if options.run_on_bcl_tile != None:
         args += " --tiles %s" % options.run_on_bcl_tile
-    run_cmd(bcl2fastq, args, cpus=8, mem_per_cpu=2048)
+        
+    run_cmd(bcl2fastq, args, dockerize=dockerize, cpus=8, mem_per_cpu=2048)
     
 
 
@@ -590,7 +601,8 @@ def trim_reads(inputs, output):
                                        unpaired1=unpaired[0], unpaired2=unpaired[1],
                                        adapter=adapters)
     max_mem = 2048
-    run_cmd(trimmomatic, args, interpreter_args="-Xmx"+str(max_mem)+"m", cpus=1, mem_per_cpu=max_mem)
+    run_cmd(trimmomatic, args, interpreter_args="-Xmx"+str(max_mem)+"m", 
+            dockerize=dockerize, cpus=1, mem_per_cpu=max_mem)
 
 
 #
@@ -624,7 +636,8 @@ def align_reads(fastqs, bam):
                      fq1=fastqs[0], fq2=fastqs[1])
     iargs = "samtools view -b -o {bam} -".format(bam=bam)
 
-    run_cmd(bwa, args, interpreter_args=iargs, cpus=threads, mem_per_cpu=8192/threads)
+    run_cmd(bwa, args, interpreter_args=iargs, 
+            dockerize=dockerize, cpus=threads, mem_per_cpu=8192/threads)
     
 
 #
@@ -646,7 +659,8 @@ def merge_lanes(lane_bams, out_bam):
     for bam in lane_bams:
         args += " I={bam}".format(bam=bam)
         
-    run_cmd(picard, args, interpreter_args="-Xmx8g", cpus=4, mem_per_cpu=2048)
+    run_cmd(picard, args, interpreter_args="-Xmx8g", 
+            dockerize=dockerize, cpus=4, mem_per_cpu=2048)
     
 
 #
@@ -752,7 +766,7 @@ def remove_dups(bam, output):
             ".format(tmp=tmp_dir, 
                      bam=bam, 
                      out=output)
-    run_cmd(picard, args, interpreter_args="-Xmx4g", mem_per_cpu=4096)
+    run_cmd(picard, args, interpreter_args="-Xmx4g", dockerize=dockerize, mem_per_cpu=4096)
 
 
 #@follows(remove_dups)
@@ -777,7 +791,8 @@ def find_realignment_intervals(input_bam, intervals):
                              indels1=indels_1kg, 
                              indels2=mills, 
                              out=intervals)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, 
+            dockerize=dockerize, mem_per_cpu=4096)
 
 
 @transform(find_realignment_intervals, suffix(".realign.intervals"), add_inputs(r'\1.dedup.bam'), '.realigned.bam')
@@ -797,7 +812,8 @@ def indel_realigner(inputs, realigned_bam):
                              indels1=indels_1kg, 
                              indels2=mills, 
                              out=realigned_bam)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, 
+            dockerize=dockerize, mem_per_cpu=4096)
 
 
 @transform(indel_realigner, suffix('.realigned.bam'), '.gatk.bam.recal_data.grp')
@@ -812,7 +828,8 @@ def recalibrate_baseq1(input_bam, output):
                             dbsnp=dbsnp, 
                             bam=input_bam, 
                             out=output)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir, mem_per_cpu=6144)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir, 
+            dockerize=dockerize, mem_per_cpu=6144)
     
 
 # This custom check ensures that the recalibrate_baseq2 step is not run in --rebuild_mode if the .gatk.bam exists
@@ -840,7 +857,8 @@ def recalibrate_baseq2(inputs, output_bam):
                                   bam=bam, 
                                   out=output_bam, 
                                   recal=recal_data) 
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, 
+            dockerize=dockerize, mem_per_cpu=4096)
     
     # remove(inputs[0])
 
@@ -867,9 +885,10 @@ def qc_gatk_bam_target_coverage_metrics(input_bam, output, output_prefix):
 
 @merge(qc_gatk_bam_target_coverage_metrics, os.path.join(runs_scratch_dir,'qc','sample_coverage.multisample.tsv')) 
 def qc_gatk_merge_sample_summary_stats(inputs, output):
-    run_cmd("head -n1 {input} > {out}".format(input=inputs[0], out=output), "", run_locally=True)
+    run_cmd("head -n1 {input} > {out}".format(input=inputs[0], out=output), "", dockerize=False, run_locally=True)
     for input in inputs:
-        run_cmd("head -n2 {input} | tail -n1 >> {out}".format(input=input, out=output), "", run_locally=True)
+        run_cmd("head -n2 {input} | tail -n1 >> {out}".format(input=input, out=output), "", 
+                dockerize=False, run_locally=True)
 
 @follows(mkdir(os.path.join(runs_scratch_dir,'qc')))
 @transform(recalibrate_baseq2, 
@@ -884,7 +903,7 @@ def qc_gatk_bam_gene_coverage_metrics(input_bam, output, output_prefix):
 @merge(qc_gatk_bam_gene_coverage_metrics, os.path.join(runs_scratch_dir,'qc','gene_coverage.multisample.tsv')) 
 def qc_gatk_merge_gene_interval_summary_stats(inputs, output):
     run_cmd("paste {inputs} > {output}".format(inputs=" ".join(inputs), output=output), 
-            "", run_locally=True)
+            "", dockerize=False, run_locally=True)
     
 @follows(mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','qualimap')))
 @transform(recalibrate_baseq2, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{subpath[0][1]}/qc/qualimap/{SAMPLE_ID[0]}')
@@ -923,7 +942,8 @@ def call_haplotypes(bam, output_gvcf):
                      dbsnp=dbsnp)
 #             -log {gvcf}.log \
 
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir, mem_per_cpu=6144)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx6g" % tmp_dir, 
+            dockerize=dockerize, mem_per_cpu=6144)
 
 
 @merge(call_haplotypes, os.path.join(runs_scratch_dir, run_id+'.multisample.gvcf'))
@@ -937,7 +957,8 @@ def merge_gvcfs(gvcfs, merged_gvcf):
     for gvcf in gvcfs:
         args = args + " --variant {}".format(gvcf)
     
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, mem_per_cpu=4096)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, 
+            dockerize=dockerize, mem_per_cpu=4096)
     
 
 @originate(call_with_gvcfs)
@@ -956,7 +977,8 @@ def genotype_gvcfs(gvcfs, output):
     for gvcf in gvcfs:
         args = args + " --variant {}".format(gvcf)
 
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, 
+            dockerize=dockerize, mem_per_cpu=8192)
 
 
 
@@ -998,7 +1020,8 @@ def find_snp_tranches_for_recalibration(vcf,outputs):
     if get_num_files() > 10:
         args += " -an InbreedingCoeff"
         
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir, cpus=options.jobs, mem_per_cpu=16386/options.jobs)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir, 
+            dockerize=dockerize, cpus=options.jobs, mem_per_cpu=16386/options.jobs)
 
 
 @follows(find_snp_tranches_for_recalibration)
@@ -1030,7 +1053,8 @@ def find_indel_tranches_for_recalibration(vcf,outputs):
     if get_num_files() > 10:
         args += " -an InbreedingCoeff"
         
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir, cpus=options.jobs, mem_per_cpu=16386/options.jobs)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir, 
+            dockerize=dockerize, cpus=options.jobs, mem_per_cpu=16386/options.jobs)
 
 
 def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP',tranche_filter=99.9):
@@ -1053,7 +1077,8 @@ def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP',t
                 num_jobs=options.jobs,
                 output=output)
             
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx16g" % tmp_dir, 
+            dockerize=dockerize, cpus=options.jobs, mem_per_cpu=16386/options.jobs)
 
 
 
@@ -1094,7 +1119,8 @@ def final_calls(input_vcf, output_vcf):
                 exome=exome)
 
     # remove(input)
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, mem_per_cpu=8192)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, 
+            dockerize=dockerize, mem_per_cpu=8192)
 
 
 def split_snp_parameters():
@@ -1123,7 +1149,8 @@ def split_snps(vcf, output, sample):
                      ad_thr=AD_threshold, 
                      dp_thr=DP_threshold)
             
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx2g" % tmp_dir, mem_per_cpu=2048)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx2g" % tmp_dir, 
+            dockerize=dockerize, mem_per_cpu=2048)
 
 
 @follows(mkdir(os.path.join(runs_scratch_dir,'qc')))
@@ -1139,7 +1166,8 @@ def variants_qc(vcfs, output):
     for vcf in vcfs:
         args += " --eval:{sample} {vcf}" % (os.path.basename(vcf), vcf)
         
-    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx2g" % tmp_dir, mem_per_cpu=2048)
+    run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx2g" % tmp_dir, 
+            dockerize=dockerize, mem_per_cpu=2048)
     
 
 def archive_results():
@@ -1149,12 +1177,13 @@ def archive_results():
     if not os.path.exists(arch_path): 
         os.mkdir(arch_path)
         
-    run_cmd("cp %s/*/*.gatk.bam %s" % (runs_scratch_dir,arch_path), "", run_locally=True)
-    run_cmd("cp %s/*/*.gatk.bam.gene_coverage* %s" % (runs_scratch_dir,arch_path), "", run_locally=True)
-    run_cmd("cp %s/*/*.exome.vcf %s" % (runs_scratch_dir,arch_path), "", run_locally=True)
+    run_cmd("cp %s/*/*.gatk.bam %s" % (runs_scratch_dir,arch_path), "", dockerize=False, run_locally=True)
+    run_cmd("cp %s/*/*.gatk.bam.gene_coverage* %s" % (runs_scratch_dir,arch_path), 
+            "", dockerize=False, run_locally=True)
+    run_cmd("cp %s/*/*.exome.vcf %s" % (runs_scratch_dir,arch_path), "", dockerize=False, run_locally=True)
     run_cmd("cp %s/*.multisample.gvcf %s" % (runs_scratch_dir, results_archive),
-            "", run_locally=True)
-    run_cmd("cp -r %s/qc %s" % (runs_scratch_dir,arch_path), "", run_locally=True)
+            "", dockerize=False, run_locally=True)
+    run_cmd("cp -r %s/qc %s" % (runs_scratch_dir,arch_path), "", dockerize=False, run_locally=True)
 
 
 def cleanup_files():
@@ -1162,7 +1191,7 @@ def cleanup_files():
             {dir}/*.multisample.indel.model* {dir}/*.multisample.snp.model* \
             {dir}/*/*.log {dir}/*.multisample.recalibratedSNPS.rawIndels.vcf* \
             {dir}/*.multisample.recalibrated.vcf* \
-            ".format(dir=runs_scratch_dir), "", run_locally=True)
+            ".format(dir=runs_scratch_dir), "", dockerize=False, run_locally=True)
 
 
 @posttask(archive_results, cleanup_files)
