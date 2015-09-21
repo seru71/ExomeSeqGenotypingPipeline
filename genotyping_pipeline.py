@@ -1128,18 +1128,13 @@ def split_snps(vcf, output, sample):
 
 @follows(mkdir(os.path.join(runs_scratch_dir,'qc')))
 @merge(split_snps, os.path.join(runs_scratch_dir,'qc','variant_qc'))
-def variants_qc(vcf, output):
+def variants_qc(vcfs, output):
     """ Generate variant QC table for all samples """    
     args = "-T VariantEval \
             -R {ref} \
             -o {out} \
             -noST -noEV -EV CountVariants \
-            ".format(ref=reference,
-                     vcf=vcf, 
-                     sample=sample, 
-                     out=output, 
-                     ad_thr=AD_threshold, 
-                     dp_thr=DP_threshold)
+            ".format(ref=reference, out=output)
     
     for vcf in vcfs:
         args += " --eval:{sample} {vcf}" % (os.path.basename(vcf), vcf)
