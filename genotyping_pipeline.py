@@ -32,12 +32,7 @@ if __name__ == '__main__':
     from optparse import OptionParser
     import StringIO
 
-    parser = OptionParser(version="%prog 1.0", usage = "\n\n    %prog --run_folder PATH_TO_RUN_FOLDER [--settings pipeline_settings.cfg] [--target_task TASK] [more_options]")
-    
-    parser.add_option("-r", "--run_folder", dest="run_folder",
-                        metavar="FILE",
-                        type="string",
-                        help="Path to the input run folder.")                  
+    parser = OptionParser(version="%prog 1.0", usage = "\n\n    %prog --settings pipeline_settings.cfg [--target_task TASK] [more_options]")
     
                                 
     #
@@ -120,7 +115,7 @@ if __name__ == '__main__':
     #       strings corresponding to the "dest" parameter
     #       in the options defined above
     #
-    mandatory_options = ['run_folder']
+    mandatory_options = ['pipeline_settings']
 
     #vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
     #                                             #
@@ -147,134 +142,9 @@ if __name__ == '__main__':
                          helpstr))
         
     check_mandatory_options(options, mandatory_options, helpstr)
-    
-    
-    #
-    # check presence of the run folder, and sample sheet file
-    #
-    if not os.path.exists(options.run_folder) or not os.path.exists(os.path.join(options.run_folder,'SampleSheet.csv')):
-        raise Exception("Missing sample sheet file: %s.\n" % os.path.join(options.run_folder,'SampleSheet.csv'))
             
     
 
-
-    #vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-    #                                             #
-    #   Get pipeline settings from a config file  #
-    #                                             #
-    #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-    import ConfigParser
-
-    config = ConfigParser.ConfigParser()
-    try:
-        if options.pipeline_settings == None:
-            options.pipeline_settings = os.path.join(options.run_folder, 'settings.cfg')
-        config.read(options.pipeline_settings)
-    except IOError:
-        raise Exception('Provided settings file [%s] does not exist or cannot be read.' % options.pipeline_settings)
-
-
-    # Should dockerized execution be used?
-    dockerize = True
-    try:
-        docker_bin = config.get('Docker','docker-binary')
-        print 'Found docker-binary setting. Using dockerized execution mode.'
-    except ConfigParser.NoOptionError:
-        print 'Docker-binary setting is missing. Using regular execution mode.'
-        dockerize = False
- 
- 
-    if dockerize:
-        # Root paths
-        reference_root = config.get('Docker','reference-root')
-    
-        run_id = os.path.dirname(options.run_folder)    # get ID of the run and use it to create scratch results folder
-        runs_scratch_dir = os.path.join(config.get('Docker','scratch-root'), run_id)
-      
-        # optional results and fastq archive dirs  
-        results_archive = None
-        try:
-            results_archive = config.get('Docker','results-archive')
-        except ConfigParser.NoOptionError:
-            print 'No results-archive provided. Results will not be archived outside of the current (working) directory.'
-    
-        fastq_archive = None
-        try:
-            fastq_archive = config.get('Docker','fastq-archive')
-        except ConfigParser.NoOptionError:
-            print 'No fastq-archive provided. Fastq files will not be archived outside of the current (working) directory.'
-
-    
-        # optional /tmp dir
-        tmp_dir = None
-        try:
-            tmp_dir = config.get('Docker','tmp-dir')
-        except ConfigParser.NoOptionError:
-            print 'No tmp-dir provided. Container\'s /tmp will be used.'
-    
-    
-        # Docker args
-        docker_args = config.get('Docker', 'docker-args')
-        docker_args += " -v " + ":".join([options.run_folder, options.run_folder,"ro"])
-        docker_args += " -v " + ":".join([reference_root,reference_root,"ro"])
-    
-        # Mount archive dirs as files from them are read (linked fastqs, gvcfs). 
-        # Archiving is not performed by docker, so no write access should be needed.
-        if fastq_archive != None:
-            docker_args += " -v " + ":".join([fastq_archive,fastq_archive,"ro"])
-        if results_archive != None:
-            docker_args += " -v " + ":".join([results_archive,results_archive,"ro"])
-    
-        # Tmp, if should be different than the default  
-        if tmp_dir != None: 
-            docker_args += " -v " + ":".join([tmp_dir,tmp_dir,"rw"])
-        else: # set the default value if the tmp-dir was unset
-            tmp_dir = "/tmp"
-            
-        docker_args += " -v " + ":".join([runs_scratch_dir,runs_scratch_dir,"rw"])
-        docker_args += " -w " + runs_scratch_dir
-        docker = " ".join([docker_bin, docker_args]) 
-    
-   
-    # Inputs 
-    try: input_bams = os.path.join(runs_scratch_dir, config.get('Inputs','input-bams'))
-    except ConfigParser.NoOptionError: input_bams=None
-    
-    # variant calls from other projects to call together with (semicolon separated list)
-    try: 
-        call_with_gvcfs = config.get('Inputs','call-with-gvcfs').split(';')
-        if dockerize:
-            call_with_gvcfs = [ os.path.join(results_archive, path.strip()) for path in call_with_gvcfs ]
-        #print 'Calling will be done together with:'
-        #for p in call_with_gvcfs:
-        #	print '\t',p
-    except ConfigParser.NoOptionError: call_with_gvcfs = [] 
-    
-    
-    # reference files
-    reference = os.path.join(reference_root, config.get('Resources','reference-genome'))
-    dbsnp = os.path.join(reference_root, config.get('Resources','dbsnp-vcf'))
-    hapmap = os.path.join(reference_root, config.get('Resources','hapmap-vcf'))
-    omni = os.path.join(reference_root, config.get('Resources','1000genomes-omni-vcf'))
-    snps_1kg = os.path.join(reference_root, config.get('Resources','1000genomes-snps-vcf'))
-    indels_1kg = os.path.join(reference_root, config.get('Resources','1000genomes-indels-vcf'))
-    mills = os.path.join(reference_root, config.get('Resources','mills-indels-vcf'))
-    capture = os.path.join(reference_root, config.get('Resources','capture-regions-bed'))
-    capture_qualimap = os.path.join(reference_root, config.get('Resources','capture-regions-bed-for-qualimap'))
-    exome = os.path.join(reference_root, config.get('Resources', 'exome-regions-bed'))
-    gene_coordinates = os.path.join(reference_root, config.get('Resources', 'gene-coordinates'))
-    
-    adapters = os.path.join(reference_root, config.get('Resources', 'adapters-fasta'))
-    
-    # tools
-    bcl2fastq = config.get('Tools','bcl2fastq')
-    trimmomatic = config.get('Tools', 'trimmomatic') 
-    bwa = config.get('Tools','bwa')
-    samtools = config.get('Tools','samtools')
-    picard = config.get('Tools','picard-tools')
-    qualimap = config.get('Tools','qualimap')
-    gatk = config.get('Tools','gatk')
 
 
 #88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888
@@ -359,6 +229,165 @@ if __name__ == '__main__':
 
 
 
+    #vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+    #                                             #
+    #   Get pipeline settings from a config file  #
+    #                                             #
+    #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    if not os.path.exists(options.pipeline_settings): 
+	raise Exception('Provided settings file [%s] does not exist or cannot be read.' % options.pipeline_settings)
+
+    import ConfigParser
+    config = ConfigParser.ConfigParser()
+    config.read(options.pipeline_settings)
+
+
+
+    # Should dockerized execution be used?
+    dockerize = True
+    try:
+        docker_bin = config.get('Docker','docker-binary')
+        logger.info('Found docker-binary setting. Using dockerized execution mode.')
+    except ConfigParser.NoOptionError:
+        logger.info('Docker-binary setting is missing. Using regular execution mode.')
+        dockerize = False
+ 
+
+    # Get the pipeline input
+    run_folder = None
+    input_fastqs = None
+    input_bams = None
+    try:
+	run_folder = config.get('Inputs','run-directory') 
+	logger.info('Found run-directory setting. Starting from bcl2fastq conversion.')
+        # check presence of the run folder, and sample sheet file
+        if not os.path.exists(run_folder) or not os.path.exists(os.path.join(run_folder,'SampleSheet.csv')):
+            raise Exception("Missing sample sheet file: %s.\n" % os.path.join(run_folder,'SampleSheet.csv'))
+    except ConfigParser.NoOptionError:
+        try:
+            input_fastqs = os.path.join(runs_scratch_dir if dockerize else '', config.get('Inputs','input-fastqs'))
+            input_fastqs_resolved = glob.glob(input_fastqs)
+            if len(input_fastqs_resolved) < 2:
+                raise Exception("Missing input FASTQs. Found %s FASTQ files in [%s].\n" % (len(input_fastqs_resolved), config.get('Inputs','input-fastqs')))
+            logger.info('Found %s input FASTQs. Starting from read trimming.' % len(input_fastqs_resolved))
+        except ConfigParser.NoOptionError:
+            try:
+                input_bams = os.path.join(runs_scratch_dir if dockerize else '', config.get('Inputs','input-bams'))
+                input_bams_resolved = glob.glob(input_bams)
+                if len(input_bams_resolved) < 1:
+                    raise Exception("Missing input BAMs. Found %s BAM files in [%s].\n" % (len(input_bams_resolved), config.get('Inputs','input-bams')))
+                logger.info('Found %s input BAMs. Starting from indexing BAMs.' % len(input_bams_resolved))
+            except ConfigParser.NoOptionError:
+	        raise Exception('Found no valid input setting in [%s]. Please provide one of [run_directory|input-fastqs|input-bams] in the pipeline settings file.' % options.pipeline_settings)
+
+
+ 
+
+
+    # Root paths
+    
+    reference_root = config.get('Paths','reference-root')
+    scratch_root = os.getcwd()
+    try:
+        scratch_root   = config.get('Paths','scratch-root')
+    except ConfigParser.NoOptionError:
+        logger.info('Scratch-root setting is missing. Using current directory: %s' % scratch_root)
+    
+    run_id = os.path.basename(run_folder) if run_folder != None else os.path.basename(scratch_root)
+    runs_scratch_dir = os.path.join(scratch-root, run_id) if run_folder != None else scratch_root
+    logger.info('Run\'s scratch directory: %s' % runs_scratch_dir)
+      
+    # optional results and fastq archive dirs  
+    results_archive = None
+    try:
+        results_archive = config.get('Paths','results-archive')
+    except ConfigParser.NoOptionError:
+        logger.info('No results-archive provided. Results will not be archived outside of the run\'s scratch directory.')
+    
+    fastq_archive = None
+    try:
+        fastq_archive = config.get('Paths','fastq-archive')
+    except ConfigParser.NoOptionError:
+        logger.info('No fastq-archive provided. Fastq files will not be archived outside of the run\'s scratch directory.')
+
+    
+    # optional /tmp dir
+    tmp_dir = None
+    try:
+        tmp_dir = config.get('Paths','tmp-dir')
+    except ConfigParser.NoOptionError:
+        logger.info('No tmp-dir provided. %s\'s /tmp will be used.' % ('Container' if dockerize else 'Execution host'))
+    
+
+    if dockerize:
+        # Docker args
+        docker_args = config.get('Docker', 'docker-args')
+        docker_args += " -v " + ":".join([run_folder, run_folder,"ro"])
+        docker_args += " -v " + ":".join([reference_root,reference_root,"ro"])
+    
+        # Mount archive dirs as files from them are read (linked fastqs, gvcfs). 
+        # Archiving is not performed by docker, so no write access should be needed.
+        if fastq_archive != None:
+            docker_args += " -v " + ":".join([fastq_archive,fastq_archive,"ro"])
+        if results_archive != None:
+            docker_args += " -v " + ":".join([results_archive,results_archive,"ro"])
+    
+        # Tmp, if should be different than the default  
+        if tmp_dir != None: 
+            docker_args += " -v " + ":".join([tmp_dir,tmp_dir,"rw"])
+            
+        docker_args += " -v " + ":".join([runs_scratch_dir,runs_scratch_dir,"rw"])
+        docker_args += " -w " + runs_scratch_dir
+        docker = " ".join([docker_bin, docker_args]) 
+    
+    # set the default value if the tmp-dir was unset
+    tmp_dir = "/tmp" if tmp_dir==None else tmp_dir
+    
+
+    # variant calls from other projects to call together with (semicolon separated list)
+    try: 
+        call_with_gvcfs = config.get('Inputs','call-with-gvcfs').split(';')
+        if dockerize:
+            call_with_gvcfs = [ os.path.join(results_archive, path.strip()) for path in call_with_gvcfs ]
+        logger.info('Calling will be done together with:')
+        for p in call_with_gvcfs:
+        	logger.info('\t'+p)
+    except ConfigParser.NoOptionError: call_with_gvcfs = [] 
+    
+    
+    # reference files
+    reference = os.path.join(reference_root, config.get('Resources','reference-genome'))
+    dbsnp = os.path.join(reference_root, config.get('Resources','dbsnp-vcf'))
+    hapmap = os.path.join(reference_root, config.get('Resources','hapmap-vcf'))
+    omni = os.path.join(reference_root, config.get('Resources','1000genomes-omni-vcf'))
+    snps_1kg = os.path.join(reference_root, config.get('Resources','1000genomes-snps-vcf'))
+    indels_1kg = os.path.join(reference_root, config.get('Resources','1000genomes-indels-vcf'))
+    mills = os.path.join(reference_root, config.get('Resources','mills-indels-vcf'))
+    capture = os.path.join(reference_root, config.get('Resources','capture-regions-bed'))
+    capture_qualimap = os.path.join(reference_root, config.get('Resources','capture-regions-bed-for-qualimap'))
+    exome = os.path.join(reference_root, config.get('Resources', 'exome-regions-bed'))
+    gene_coordinates = os.path.join(reference_root, config.get('Resources', 'gene-coordinates'))
+    
+    try:
+        adapters = os.path.join(reference_root, config.get('Resources', 'adapters-fasta'))
+    except ConfigParser.NoOptionError:
+        if run_folder != None or input_fastqs != None: raise Exception('Found no adapters-fasta setting, which is required for read trimming.')
+    
+    # tools
+    bcl2fastq = config.get('Tools','bcl2fastq')
+    trimmomatic = config.get('Tools', 'trimmomatic') 
+    bwa = config.get('Tools','bwa')
+    samtools = config.get('Tools','samtools')
+    picard = config.get('Tools','picard-tools')
+    qualimap = config.get('Tools','qualimap')
+    gatk = config.get('Tools','gatk')
+
+
+
+    # Other
+    tsd_account = config.get('Other','tsd-account')
+	
 
 
 
@@ -390,22 +419,28 @@ Examples of correct commands:
     cmd = "java {interpreter_args} -jar myjarfile.jar {args} -extras extra_arg
     cmd = "java -XmX4G {interpreter_args} -jar myjarfile.jar {args} -extras extra_arg
 """
-def run_cmd(cmd, args, dockerize, interpreter_args=None, cpus=1, mem_per_cpu=1024, run_locally=False):
+def run_cmd(cmd, args, dockerize, interpreter_args=None, run_locally=False,
+            cpus=1, mem_per_cpu=1024, walltime='24:00:00', 
+            retain_job_scripts = True, job_script_dir = os.path.join(runs_scratch_dir, "drmaa")):
     
     full_cmd = ("{docker} "+cmd).format(docker = docker if dockerize else "",
                                         args=args, 
                                         interpreter_args = interpreter_args if interpreter_args!=None else "")
 
     stdout, stderr = "", ""
-    job_options = "--ntasks=1 \
+    job_options = "--account={account} \
+		   --ntasks=1 \
                    --cpus-per-task={cpus} \
-                   --mem-per-cpu={mem}".format(cpus=cpus, mem=mem_per_cpu)
+                   --mem-per-cpu={mem} \
+                   --time={time} \
+                  ".format(account=tsd_account, cpus=cpus, mem=int(1.2*mem_per_cpu), time=walltime)
                    
     try:
         stdout, stderr = run_job(full_cmd.strip(), 
                                  job_other_options=job_options,
                                  run_locally = run_locally, 
-                                 retain_job_scripts = True, job_script_directory = "drmaa/",
+                                 retain_job_scripts = retain_job_scripts, job_script_directory = job_script_dir,
+                                 logger=logger, working_directory=os.getcwd(),
                                  drmaa_session = drmaa_session)
     except error_drmaa_job as err:
         raise Exception("\n".join(map(str, ["Failed to run:", cmd, err, stdout, stderr])))
@@ -450,13 +485,13 @@ def bam_target_coverage_metrics(input_bam, output):
                     -o {output} \
                     -I {input} \
                     -L {capture} \
-                    -ct 8 -ct 20 -ct 30 \
+                    -ct 10 -ct 20 -ct 30 \
                     --omitDepthOutputAtEachBase --omitLocusTable \
                     ".format(reference=reference,
                              output=output,
                              input=input_bam,
                              capture=capture), 
-            interpreter_args="-Xmx4g", dockerize=dockerize)
+            interpreter_args="-Xmx4g", dockerize=dockerize, mem_per_cpu=4096)
 
 def bam_gene_coverage_metrics(input_bam, output):
     """ Calculates and outputs bam coverage statistics """
@@ -466,14 +501,14 @@ def bam_gene_coverage_metrics(input_bam, output):
                     -I {input} \
                     -L {capture} \
                     -geneList {genes} \
-                    -ct 5 -ct 10 -ct 20 \
+                    -ct 10 -ct 20 -ct 30 \
                     --omitDepthOutputAtEachBase --omitLocusTable \
                     ".format(reference=reference,
                              output=output,
                              input=input_bam,
                              capture=capture,
                              genes=gene_coordinates), 
-            interpreter_args="-Xmx4g", dockerize=dockerize)
+            interpreter_args="-Xmx4g", dockerize=dockerize, mem_per_cpu=4096)
 
 def qualimap_bam(input_bam, output_dir):
     """ Generates Qualimap bam QC report """
@@ -517,8 +552,9 @@ from ruffus import *
 # Prepare FASTQ
 # 
 
+@active_if(run_folder != None)
 @follows(mkdir(runs_scratch_dir), mkdir(os.path.join(runs_scratch_dir,'fastqs')))
-@files(options.run_folder, os.path.join(runs_scratch_dir,'fastqs','completed'))
+@files(run_folder, os.path.join(runs_scratch_dir,'fastqs','completed'))
 @posttask(touch_file(os.path.join(runs_scratch_dir,'fastqs','completed')))
 def bcl2fastq_conversion(run_directory, completed_flag):
     """ Run bcl2fastq conversion and create fastq files in the run directory"""
@@ -535,7 +571,7 @@ def bcl2fastq_conversion(run_directory, completed_flag):
     
 
 
-@active_if(fastq_archive != None)
+@active_if(run_folder != None and fastq_archive != None)
 @transform(bcl2fastq_conversion, formatter(".+/(?P<RUN_ID>[^/]+)/fastqs/completed"), str(fastq_archive)+"/{RUN_ID[0]}")
 def archive_fastqs(completed_flag, archive_dir):
     """ Archive fastqs """    
@@ -559,9 +595,10 @@ def archive_fastqs(completed_flag, archive_dir):
 #    /path/to/file/[SAMPLE_ID]_S[1-9]\d?_L\d\d\d_R[12]_001.fastq.gz
 # SAMPLE_ID can contain all signs except path delimiter, i.e. "\"
 #
+@active_if(run_folder != None or input_fastqs != None)
 @jobs_limit(1)    # to avoid problems with simultanous creation of the same sample dir
 @follows(archive_fastqs)
-@subdivide(os.path.join(runs_scratch_dir,'fastqs','*.fastq.gz'),
+@subdivide(os.path.join(runs_scratch_dir,'fastqs','*.fastq.gz') if run_folder != None else input_fastqs,
            formatter('(?P<PATH>.+)/(?P<SAMPLE_ID>[^/]+)_S[1-9]\d?_L\d\d\d_R[12]_001\.fastq\.gz$'), 
            '{subpath[0][1]}/{SAMPLE_ID[0]}/{basename[0]}{ext[0]}')
 def link_fastqs(fastq_in, fastq_out):
@@ -582,6 +619,7 @@ def link_fastqs(fastq_in, fastq_out):
 #    [SAMPLE_ID]_[LANE_ID].fq2.gz
 # SAMPLE_ID can contain all signs except path delimiter, i.e. "\"
 #
+@active_if(run_folder != None or input_fastqs != None)
 @collate(link_fastqs, regex(r'(.+)/([^/]+)_S[1-9]\d?_(L\d\d\d)_R[12]_001\.fastq\.gz$'),  r'\1/\2_\3.fq1.gz')
 def trim_reads(inputs, output):
     outfq1 = output
@@ -620,6 +658,7 @@ def trim_reads(inputs, output):
 #    [SAMPLE_ID]_[LANE_ID].bam
 #
 #@collate(trim_reads, regex(r"([^_]+_[^_]+)\.fq[12]\.gz$"), r'\1.sam')
+@active_if(run_folder != None or input_fastqs != None)
 @transform(trim_reads, suffix('.fq1.gz'), add_inputs(r'\1.fq2.gz'), '.bam')
 def align_reads(fastqs, bam):
     threads = 2
@@ -640,54 +679,6 @@ def align_reads(fastqs, bam):
             dockerize=dockerize, cpus=threads, mem_per_cpu=8192/threads)
     
 
-#
-# BAM filenames are expected to have following format:
-#    [SAMPLE_ID]_[LANE_ID].bam
-# In this step, all BAM files matching on the SAMPLE_ID will be merged into one BAM file:
-#    [SAMPLE_ID].bam
-# SAMPLE_ID can contain all signs except path delimiter, i.e. "\"
-#
-@jobs_limit(4)    # to avoid filesystem problems 
-@collate(align_reads, regex(r"(.+)/([^/]+).+\.bam$"),  r'\1/\2.bam')
-def merge_lanes(lane_bams, out_bam):
-    args = "MergeSamFiles O={bam} \
-            ASSUME_SORTED=false \
-            MAX_RECORDS_IN_RAM=2000000 \
-            USE_THREADING=true \
-            ".format(bam=out_bam)
-    # include all bam files as args
-    for bam in lane_bams:
-        args += " I={bam}".format(bam=bam)
-        
-    run_cmd(picard, args, interpreter_args="-Xmx8g", 
-            dockerize=dockerize, cpus=4, mem_per_cpu=2048)
-    
-
-#
-# NOT USED
-# 
-# For bam-level entry to the pipeline, create a following scratch dir structure:
-# DATA_ROOT/
-#     RUN_ID/
-#         SAMPLE_1/
-#             SAMPLE_1.bam
-#         SAMPLE_2/
-#             SAMPLE_2.bam
-#         ...
-#
-# Provide RUN_ID/*/*.bam as input-bams setting in the settings file, and change decorators of index task to sth like:
-#     @files(generate_bam_inputs)
-# All prior pipeline steps have to disabled (or mocked up-to-date)
-#
-def generate_bam_inputs():
-    files = glob.glob(input_bams)
-    parameters = []
-    for f in files:
-        prefix = os.path.splitext(os.path.basename(f))[0]
-        parameters.append([f, f+'.bai'])
-    for job_parameters in parameters:
-            yield job_parameters
-
 
 def clean_fastqs_and_lane_bams():
     """ Remove the trimmed fastq files, and SAM files. Links to original fastqs are kept """
@@ -696,13 +687,60 @@ def clean_fastqs_and_lane_bams():
     for f in glob.glob(os.path.join(runs_scratch_dir,'*','*_L\d\d\d.bam')):
         os.remove(f)
 
-
+#
+# BAM filenames are expected to have following format:
+#    [SAMPLE_ID]_[LANE_ID].bam
+# In this step, all BAM files matching on the SAMPLE_ID will be merged into one BAM file:
+#    [SAMPLE_ID].bam
+# SAMPLE_ID can contain all signs except path delimiter, i.e. "\"
+#
+@active_if(run_folder != None or input_fastqs != None)
+@collate(align_reads, regex(r"(.+)/([^/]+)_L.+\.bam$"),  r'\1/\2.bam')
 @posttask(clean_fastqs_and_lane_bams)
-@transform(merge_lanes, suffix(".bam"), '.bam.bai')
+def merge_lanes(lane_bams, out_bam):
+    args = "MergeSamFiles O={bam} \
+            SORT_ORDER=unsorted \
+            ASSUME_SORTED=true \
+            ".format(bam=out_bam)
+    # include all bam files as args
+    for bam in lane_bams:
+        args += " I={bam}".format(bam=bam)
+        
+    run_cmd(picard, args, interpreter_args="-Xmx4g", 
+            dockerize=dockerize, mem_per_cpu=4096)
+    
+
+
+# For bam-level entry to the pipeline, create a following scratch dir structure:
+# SCRATCH_ROOT/
+#     RUN_ID/
+#         SAMPLE_1/
+#             SAMPLE_1.bam
+#         SAMPLE_2/
+#             SAMPLE_2.bam
+#         ...
+#
+# If entry to the pipeline is fastq files, or run_folder (bcl2fastq conversion) this step does nothing
+#
+@active_if(input_bams != None)
+@jobs_limit(1)    # to avoid problems with simultanous creation of the same sample dir
+@follows(merge_lanes)
+@subdivide(input_bams,
+           formatter('(?P<PATH>.+)/(?P<SAMPLE_ID>[^/]+).bam$'), 
+           os.path.join(runs_scratch_dir,'{SAMPLE_ID[0]}/{basename[0]}{ext[0]}'))
+def link_bams(bam_in, bam_out):
+    """Make working directory for every sample and link BAM files in"""
+    if not os.path.exists(os.path.dirname(bam_out)):
+        os.mkdir(os.path.dirname(bam_out))
+    if not os.path.exists(bam_out):
+        os.symlink(bam_in, bam_out) 
+
+
+
+@transform(link_bams, suffix(".bam"), '.bam.bai')
 def index(bam, output):
     """Create raw bam index"""
-    index_bam(bam)
-
+  #  index_bam(bam)
 
 
 #
@@ -711,29 +749,29 @@ def index(bam, output):
 #
 
 @follows(index)
-@transform(merge_lanes, suffix(".bam"), '.quality_score')
+@transform([merge_lanes, link_bams], suffix(".bam"), '.quality_score')
 def qc_raw_bam_quality_score_distribution(input_bam, output):
     """docstring for metrics1"""
     bam_quality_score_distribution(input_bam, output, output + '.pdf')
 
 @follows(index)
-@transform(merge_lanes, suffix(".bam"), '.metrics')
+@transform([merge_lanes, link_bams], suffix(".bam"), '.metrics')
 def qc_raw_bam_alignment_metrics(input_bam, output):
     """docstring for metrics1"""
     bam_alignment_metrics(input_bam, output)
     
 @follows(index)
-@transform(merge_lanes, suffix(".bam"), '.target_coverage.sample_summary', r'\1.target_coverage')
+@transform([merge_lanes, link_bams], suffix(".bam"), '.target_coverage.sample_summary', r'\1.target_coverage')
 def qc_raw_bam_target_coverage_metrics(input_bam, output, output_format):
     bam_target_coverage_metrics(input_bam, output_format)
 
 @follows(index)
-@transform(merge_lanes, suffix('.bam'), '.gene_coverage.sample_summary', r'\1.gene_coverage')
+@transform([merge_lanes, link_bams], suffix('.bam'), '.gene_coverage.sample_summary', r'\1.gene_coverage')
 def qc_raw_bam_gene_coverage_metrics(input_bam, output, output_format):
     bam_gene_coverage_metrics(input_bam, output_format)
 
 @follows(index, mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','qualimap')))
-@transform(merge_lanes, formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{subpath[0][1]}/qc/qualimap/{SAMPLE_ID[0]}')
+@transform([merge_lanes, link_bams], formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), '{subpath[0][1]}/qc/qualimap/{SAMPLE_ID[0]}')
 def qc_raw_bam_qualimap_report(input_bam, output_dir):
     qualimap_bam(input_bam, output_dir)
 
@@ -752,8 +790,17 @@ def raw_bam_qc():
 #
 
 
-@follows(index)
-@transform(merge_lanes, suffix(".bam"), '.dedup.bam')
+@transform([merge_lanes, link_bams], suffix('.bam'), '.srt.bam')
+def sort(bam, sorted_bam):
+    """ Sort the merged or input bam file """
+    threads=2
+    args = "sort -@ {threads} {bam} {out_prefix}".format(threads=threads, bam=bam, out_prefix=sorted_bam[:-len('.bam')])
+    run_cmd(samtools, args, dockerize=dockerize, cpus=threads, mem_per_cpu=1024*threads)
+#    index_bam(sorted_bam)
+
+
+
+@transform(sort, suffix(".bam"), '.dedup.bam')
 def remove_dups(bam, output):
     """Use Picard to mark duplicates"""
     args = "MarkDuplicates \
@@ -879,12 +926,12 @@ def qc_gatk_bam_alignment_metrics(input_bam, output):
     bam_alignment_metrics(input_bam, output)
 
 @transform(recalibrate_baseq2, suffix('.gatk.bam'), '.target_coverage.sample_summary', r'\1.target_coverage')
-def qc_gatk_bam_target_coverage_metrics(input_bam, output, output_prefix):
+def qc_gatk_bam_target_coverage_stats(input_bam, output, output_prefix):
     """ Generate target-level coverage stats for gatk bam """
     bam_target_coverage_metrics(input_bam, output_prefix)
 
-@merge(qc_gatk_bam_target_coverage_metrics, os.path.join(runs_scratch_dir,'qc','sample_coverage.multisample.tsv')) 
-def qc_gatk_merge_sample_summary_stats(inputs, output):
+@merge(qc_gatk_bam_target_coverage_stats, os.path.join(runs_scratch_dir,'qc',run_id+'.target_coverage.tsv')) 
+def qc_gatk_bam_merge_target_coverage_stats(inputs, output):
     run_cmd("head -n1 {input} > {out}".format(input=inputs[0], out=output), "", dockerize=False, run_locally=True)
     for input in inputs:
         run_cmd("head -n2 {input} | tail -n1 >> {out}".format(input=input, out=output), "", 
@@ -893,15 +940,15 @@ def qc_gatk_merge_sample_summary_stats(inputs, output):
 @follows(mkdir(os.path.join(runs_scratch_dir,'qc')))
 @transform(recalibrate_baseq2, 
            formatter(".*/(?P<SAMPLE_ID>[^/]+).bam"), 
-           '{subpath[0][1]}/qc/{SAMPLE_ID[0]}.gene_coverage.interval_summary',
+           '{subpath[0][1]}/qc/{SAMPLE_ID[0]}.gene_coverage.sample_gene_summary',
            '{subpath[0][1]}/qc/{SAMPLE_ID[0]}.gene_coverage')
 #           suffix('.gatk.bam'), '.gene_coverage.sample_summary', r'\1.gene_coverage')   
-def qc_gatk_bam_gene_coverage_metrics(input_bam, output, output_prefix):
+def qc_gatk_bam_gene_coverage_stats(input_bam, output, output_prefix):
     """ Generate gene-level coverage stats for gatk bam """
     bam_gene_coverage_metrics(input_bam, output_prefix)
     
-@merge(qc_gatk_bam_gene_coverage_metrics, os.path.join(runs_scratch_dir,'qc','gene_coverage.multisample.tsv')) 
-def qc_gatk_merge_gene_interval_summary_stats(inputs, output):
+@merge(qc_gatk_bam_gene_coverage_stats, os.path.join(runs_scratch_dir,'qc',run_id+'.gene_coverage.tsv')) 
+def qc_gatk_bam_merge_gene_summary_stats(inputs, output):
     run_cmd("paste {inputs} > {output}".format(inputs=" ".join(inputs), output=output), 
             "", dockerize=False, run_locally=True)
     
@@ -911,7 +958,7 @@ def qc_gatk_bam_qualimap_report(input_bam, output_dir):
     """ Produces qualimap report for gatk bam """
     qualimap_bam(input_bam, output_dir)
 
-@follows(qc_gatk_merge_gene_interval_summary_stats)
+@follows(qc_gatk_bam_merge_gene_summary_stats)
 def gatk_bam_qc():
     """ Aggregates gatk_bam quality control steps """
     pass
@@ -955,7 +1002,7 @@ def merge_gvcfs(gvcfs, merged_gvcf):
             -log {out}.log".format(reference=reference, out=merged_gvcf)
        
     for gvcf in gvcfs:
-        args = args + " --variant {}".format(gvcf)
+        args = args + (" --variant %s" % gvcf)
     
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx4g" % tmp_dir, 
             dockerize=dockerize, mem_per_cpu=4096)
@@ -975,7 +1022,7 @@ def genotype_gvcfs(gvcfs, output):
 
     # if there are any external gvcfs to call with, include them
     for gvcf in gvcfs:
-        args = args + " --variant {}".format(gvcf)
+        args = args + (" --variant %s" % gvcf)
 
     run_cmd(gatk, args, interpreter_args="-Djava.io.tmpdir=%s -Xmx8g" % tmp_dir, 
             dockerize=dockerize, mem_per_cpu=8192)
@@ -1082,29 +1129,22 @@ def apply_recalibration_to_snps_or_indels(vcf,recal,tranches,output,mode='SNP',t
 
 
 
-#@follows(find_indel_tranches_for_recalibration)
-#@files(['multisample.gatk.vcf','multisample.gatk.snp.model','multisample.gatk.snp.model.tranches'],'multisample.gatk.recalibratedSNPS.rawIndels.vcf')
-@collate(find_snp_tranches_for_recalibration, 
-         regex(r'(.+)/([^/]+)/(.+\.multisample).snp.model*'), 
-         r'\1/\2/\3.recalibratedSNPs.rawIndels.vcf', 
-         add_inputs(r'\1/\2/\3.vcf'))
-#os.path.join(runs_scratch_dir,run_id,run_id+'multisample.vcf')))
-def apply_recalibration_filter_snps(inputs,output):
-    #apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='SNP',tranche_filter=99.9)
-    apply_recalibration_to_snps_or_indels(inputs[2],inputs[0],inputs[1],output,mode='SNP',tranche_filter=99.9)
+@transform(find_snp_tranches_for_recalibration, suffix('.snp.model'), add_inputs(r'\1.vcf'), r'\1.recalibratedSNPs.rawIndels.vcf')
+def apply_recalibration_filter_snps(inputs, output):
+    """ Recalibrate SNPs """
+    prev_task_outputs = inputs[0]
+    apply_recalibration_to_snps_or_indels(inputs[1], prev_task_outputs[0], prev_task_outputs[1], output, mode='SNP', tranche_filter=99.9)
 
 
 @follows(apply_recalibration_filter_snps)
-#@files(['multisample.gatk.recalibratedSNPS.rawIndels.vcf','multisample.gatk.indel.model','multisample.gatk.indel.model.tranches'],'multisample.gatk.recalibrated.vcf')
-@collate(find_indel_tranches_for_recalibration, 
-         regex(r'(.+)/([^/]+)/(.+\.multisample).snp.model*'), 
-         r'\1/\2/\3.recalibrated.vcf', 
-         add_inputs(r'\1/\2/\3.recalibratedSNPs.rawIndels.vcf'))
-def apply_recalibration_filter_indels(inputs,output):
-    apply_recalibration_to_snps_or_indels(inputs[0],inputs[1],inputs[2],output,mode='INDEL',tranche_filter=99.0)
+@transform(find_indel_tranches_for_recalibration, suffix('.indel.model'), add_inputs(r'\1.recalibratedSNPs.rawIndels.vcf'), r'\1.analysisReady.vcf')
+def apply_recalibration_filter_indels(inputs, output):
+    """ Recalibrate INDELs """
+    prev_task_outputs = inputs[0]
+    apply_recalibration_to_snps_or_indels(inputs[1], prev_task_outputs[0], prev_task_outputs[1], output, mode='INDEL', tranche_filter=99.0)
     
 
-@transform(apply_recalibration_filter_indels, suffix('.recalibrated.vcf'), '.analysisReady.exome.vcf')
+@transform(apply_recalibration_filter_indels, suffix('.analysisReady.vcf'), '.analysisReady.exome.vcf')
 def final_calls(input_vcf, output_vcf):
     """ Produce the final variant calls in the exome regions """    
     args = "-T SelectVariants \
@@ -1228,7 +1268,8 @@ if __name__ == '__main__':
     else:        
         pipeline_run(options.target_tasks, options.forced_tasks,
                             multithread     = options.jobs,
-                            logger          = stderr_logger,
+#                            logger          = stderr_logger,
+                            logger          = logger,
                             verbose         = options.verbose,
                             gnu_make_maximal_rebuild_mode = options.rebuild_mode,
                             checksum_level  = 0)

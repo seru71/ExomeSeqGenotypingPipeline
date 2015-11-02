@@ -20,10 +20,10 @@ You might also need following packages: optparse, logging, shutil
 2. Clone the pipeline repository:
 `git clone https://github.com/seru71/ExomeSeqGenotypingPipeline.git <PIPELINE_HOME>`
 
-3. Change directory to newly created pipeline dir, and select the `diagnostic` branch
+3. Change directory to newly created pipeline dir, and select the `dockerized` branch
 ```
 cd <PIPELINE_HOME>
-git checkout diagnostic
+git checkout dockerized
 ```
 
 The pipeline is ready now, but you will need all of its components to perform the analysis.
@@ -39,7 +39,7 @@ If you are starting from FASTQ files you will also need:
 4. Trimmomatic (http://www.usadellab.org/cms/?page=trimmomatic)
 5. BWA (http://sourceforge.net/projects/bio-bwa/files)
 
-And if your input is not yet converted to FASTQ, install also:  
+And if your input is not yet converted to FASTQ, install also: 
 6. bcl2fastq (http://support.illumina.com/downloads/bcl2fastq-conversion-software-v216.html)
 
 Optional tool for some QC tasks:
@@ -60,7 +60,7 @@ http://gatkforums.broadinstitute.org/discussion/1601/how-can-i-prepare-a-fasta-f
 `capture` - used for QC metrics (QualiMap, depth of coverage reports, etc.)
 `exome`   - usually superset of `capture`; used to limit data processing to these regions. No variants outside of these intervals will be reported.
 They can be the exact same file, but sometimes one wants to add flanking sequence to the capture (e.g. +/-10bp) when filtering variants. 
-Both files should be prepared in advance.     
+Both files should be prepared in advance. 
 
 
 ## Usage
@@ -70,24 +70,23 @@ The NGS pipeline is run using `genotyping_pipeline.py` script:
 * Running the script
 
     You can run the script using `python <PIPELINE_HOME>/genotyping_pipeline.py`.
-    A list of possible options will be presented. The only required option is `--run_folder RUN_FOLDER`, 
-    which specifies the location of input NextSeq500's run folder.
+    A list of possible options will be presented. The only required option is `--pipeline_settings FILE`, 
+    which specifies the location of the settings file.
     
-    Important part of the pipeline is the settings file which contains paths to resources 
+    The settings file contains paths to input files, resources 
     (e.g. reference genome, database, capture regions), docker settings, 
     and docker containers to use. See an exemplary file for all required options 
     in <PIPELINE_HOME>/pipeline_settings.cfg.
-    If the settings file is not given as argument (--settings), it is expected in the RUN_FOLDER/settings.cfg
   
     If you want to follow progress of the script, use the verbose option (`-vvvvv`).
     In order to use multithreading, use the `-j` option (`-j 12`).
 
 * Outputs
 
-    The script will create RUN_ID folder in the scratch-root directory (given in settings). 
-    Inside there will be several directories: 
-    	SAMPLE_ID/ - one dir per sample, named after samples found in the RUN_FOLDER 
-    	fastqs/    - fastq files
+    The pipeline script creates following directory structure in scratch-root directory (given in settings), or in 
+    scratch-root/RUN_ID (if the pipeline is run with bcl2fastq step):
+    	SAMPLE_ID/ - one dir per sample, named after samples found in the input data
+    	fastqs/    - fastq files (if bcl2fastq conversion is run)
     	drmaa/     - slurm scripts created automatically (for debugging purposes)
     	qc/        - qc output
 
@@ -95,9 +94,8 @@ The NGS pipeline is run using `genotyping_pipeline.py` script:
     	- cleaned up bam file (`SAMPLE_ID.gatk.bam`)
     	- VCF file (`SAMPLE_ID.exome.vcf`) with variants restricted to the exome intervals (specified in the settings file)
     	- GVCF file (`SAMPLE_ID.gvcf`)
-    	- some quality control files (e.g. coverage statistics)
    
-    Directly in the RUN_ID directory additional files will be created:
+    Directly in the scratch directory additional files will be created:
     	- multisample VCF with raw snps and indels for all samples (`RUN_ID.multisample.vcf`)
     	- cleanded multisample VCF with recalibrated variants restricted to the exome intervals (`RUN_ID.multisample.analysisReady.exome.vcf`) 
 
@@ -105,11 +103,10 @@ The NGS pipeline is run using `genotyping_pipeline.py` script:
 
     For running the genotyping analysis using 12 concurrent tasks:
 
-	genotyping_pipeline.py --run_folder /incoming/RUN_XXXX_YYYY_ZZZZZ \
-						    --settings /my_dir/pipeline_settings/nextera_1.2_settings.cfg \
-							--target complete_run \
-							-vvv -j 12 \
-							--log_file /my_dir/pipeline_run_XXX.log
+	genotyping_pipeline.py --settings /my_dir/pipeline_settings/nextera_1.2_settings.cfg \
+				--target complete_run \
+				-vvv -j 12 \
+				--log_file /my_dir/pipeline_run_XXX.log
 
 
 
